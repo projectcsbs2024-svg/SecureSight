@@ -163,7 +163,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
 
       {/* Alert Modal */}
       {selectedAlert && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-transparent bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg relative">
             <button className="absolute top-3 right-3 text-gray-500 hover:text-gray-700" onClick={() => setSelectedAlert(null)}>
               <X size={20} />
