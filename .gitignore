@@ -17,7 +17,7 @@ backend/.env
 backend/*.pyc
 backend/.pytest_cache/
 backend/.DS_Store
-backend/serviceAccountKey.json  # Firebase admin secret
+backend/app/serviceAccountKey.json  # Firebase admin secret
 
 # ========================
 # OS / Misc
@@ -25,3 +25,5 @@ backend/serviceAccountKey.json  # Firebase admin secret
 .DS_Store
 Thumbs.db
 *.log
+
+
