@@ -18,6 +18,11 @@ backend/*.pyc
 backend/.pytest_cache/
 backend/.DS_Store
 backend/app/serviceAccountKey.json  # Firebase admin secret
+serviceAccountKey.json
+app/serviceAccountKey.json
+*.json
+
+
 
 # ========================
 # OS / Misc
