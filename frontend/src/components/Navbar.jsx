@@ -1,6 +1,7 @@
 import React from "react";
 import { signOut } from "firebase/auth";
 import { auth } from "../firebase";
+import logo from "../assets/SecureSight_logo.svg"; // Moved to src/assets
 
 export const Navbar = ({ userEmail }) => {
   const handleLogout = async () => {
@@ -16,9 +17,8 @@ export const Navbar = ({ userEmail }) => {
     <header className="fixed top-0 left-0 w-full bg-gray-800 p-4 flex justify-between items-center z-50">
       {/* Branding */}
       <div className="flex items-center gap-3">
-        {/* Logo (replace src with your actual logo file) */}
         <img
-          src="/logo.png"
+          src={logo}
           alt="SecureSight Logo"
           className="w-8 h-8 rounded-md object-contain"
         />
