@@ -173,8 +173,8 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
               <h2 className="text-xl font-bold mb-2 text-gray-800">{selectedAlert.type}</h2>
               <p className="text-sm text-gray-600 mb-4">Detected on <strong>{selectedAlert.camera}</strong> at {selectedAlert.time}</p>
               <div className="space-y-2">
-                <p><strong>Confidence:</strong> <span className="text-green-600">{selectedAlert.confidence}%</span></p>
-                <p><strong>Status:</strong> <span className={selectedAlert.status === "Active" ? "text-red-600" : "text-blue-600"}>{selectedAlert.status}</span></p>
+                <p><strong className="text-gray-800">Confidence:</strong> <span className="text-green-600">{selectedAlert.confidence}%</span></p>
+                <p><strong className="text-gray-800">Status:</strong> <span className={selectedAlert.status === "Active" ? "text-red-600" : "text-blue-600"}>{selectedAlert.status}</span></p>
               </div>
               <div className="mt-5 flex justify-end">
                 <button onClick={() => setSelectedAlert(null)} className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-md text-sm font-semibold">
