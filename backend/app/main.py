@@ -14,12 +14,13 @@ models.Base.metadata.create_all(bind=engine)
 class UserResponse(BaseModel):
     user_mail: str
     user_name: str
+    uid : str
 
     class Config:
         orm_mode = True
 
 class UserSettingsResponse(BaseModel):
-    user_mail: str
+    uid: str
     alert_email: Any | None = None
     weapon_threshold: float | None = 0.65
     scuffle_threshold: float | None = 0.65
@@ -48,15 +49,17 @@ def get_users(db: db_dependency):
     return users
 
 
-@app.get("/user_settings/{user_mail}", response_model=UserSettingsResponse)
-def get_user_settings(user_mail: str, db: db_dependency):
+@app.get("/user_settings/{uid}", response_model=UserSettingsResponse)
+def get_user_settings(uid: str, db: db_dependency):
     settings = db.query(models.UserSettings).filter(
-        models.UserSettings.user_mail == user_mail
+        models.UserSettings.uid == uid
     ).first()
 
     if not settings:
         raise HTTPException(
             status_code=404,
-            detail=f"No settings found for user_mail '{user_mail}'"
+            detail=f"No settings found for user_mail '{uid}'"
         )
     return settings
+
+
