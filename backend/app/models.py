@@ -1,15 +1,17 @@
-# models.py
-from sqlalchemy import Column, String, Float
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, String, JSON, DECIMAL
+from app.database import Base
 
-Base = declarative_base()
+class User(Base):
+    __tablename__ = "users"
+
+    user_mail = Column(String(100), primary_key=True, index=True)
+    user_name = Column(String(50), unique=True)
 
 class UserSettings(Base):
     __tablename__ = "user_settings"
-    user_mail = Column(String, primary_key=True, index=True)
-    alert_email = Column(String)  # store as comma-separated string or JSON
-    weapon_threshold = Column(Float)
-    scuffle_threshold = Column(Float)
-    stamped_threshold = Column(Float)
 
-
+    user_mail = Column(String(255), primary_key=True, index=True, nullable=False)
+    alert_email = Column(JSON, nullable=True)
+    weapon_threshold = Column(DECIMAL(3, 2), nullable=True, default=0.65)
+    scuffle_threshold = Column(DECIMAL(3, 2), nullable=True, default=0.65)
+    stamped_threshold = Column(DECIMAL(3, 2), nullable=True, default=0.65)
