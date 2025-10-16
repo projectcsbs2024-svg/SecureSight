@@ -68,19 +68,32 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
 
   // Save settings (placeholder)
   const handleSaveSettings = async () => {
-    try {
-      await api.post("/user_settings/tokenid", {
+  if (!user) return;
+
+  const token = await user.getIdToken(); // Firebase ID token
+
+  try {
+    await api.post(
+      "/user_settings", // no /tokenid
+      {
         alert_email: alertEmails,
         weapon_threshold: thresholds.weapon / 100,
         scuffle_threshold: thresholds.scuffle / 100,
         stamped_threshold: thresholds.stampede / 100,
-      });
-      alert("Settings saved!");
-    } catch (err) {
-      console.error("Failed to save settings:", err);
-      alert("Error saving settings.");
-    }
-  };
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${token}`, // send token in header
+        },
+      }
+    );
+    alert("Settings saved!");
+  } catch (err) {
+    console.error("Failed to save settings:", err);
+    alert("Error saving settings.");
+  }
+};
+
 
 
   if (!user || loading) {
