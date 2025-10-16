@@ -1,25 +1,49 @@
 // src/pages/Settings.jsx
-import React, { useState } from "react";
+import { useEffect , useState } from "react";
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
 import { Trash2 } from "lucide-react";
+import api from "../apiHandle/api";
+import { fetchUserSettings } from "../apiHandle/userSettings"; // your API call
 
 export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
 
-  // Alert recipients
-  const [alertEmails, setAlertEmails] = useState([]);
+  useEffect(() => {
+    const loadUserSettings = async () => {
+      try {
+        setLoading(true);
+        const data = await fetchUserSettings();
 
-  // Detection thresholds (0-100)
+        // data should match backend response: { alert_email, weapon_threshold, scuffle_threshold, stamped_threshold }
+        setAlertEmails(data.alert_email || []);
+        setThresholds({
+          weapon: Math.round((data.weapon_threshold || 0.5) * 100),
+          scuffle: Math.round((data.scuffle_threshold || 0.5) * 100),
+          stampede: Math.round((data.stamped_threshold || 0.5) * 100),
+        });
+      } catch (err) {
+        console.error("Failed to load user settings:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadUserSettings();
+  }, []);
+
+  // Alert recipients
+ const [alertEmails, setAlertEmails] = useState([]);
   const [thresholds, setThresholds] = useState({
     weapon: 50,
     scuffle: 50,
     stampede: 50,
   });
+  const [loading, setLoading] = useState(true);
 
-  // Add new email
+    // Add new email
   const addAlertEmail = () => {
     setAlertEmails([...alertEmails, ""]);
   };
@@ -43,14 +67,29 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   };
 
   // Save settings (placeholder)
-  const handleSaveSettings = () => {
-    console.log("Alert Emails:", alertEmails);
-    console.log("Detection Thresholds:", thresholds);
-    alert("Settings saved!");
+  const handleSaveSettings = async () => {
+    try {
+      await api.post("/user_settings/tokenid", {
+        alert_email: alertEmails,
+        weapon_threshold: thresholds.weapon / 100,
+        scuffle_threshold: thresholds.scuffle / 100,
+        stamped_threshold: thresholds.stampede / 100,
+      });
+      alert("Settings saved!");
+    } catch (err) {
+      console.error("Failed to save settings:", err);
+      alert("Error saving settings.");
+    }
   };
 
-  if (!user)
-    return <div className="flex justify-center items-center h-screen text-gray-400">Loading...</div>;
+
+  if (!user || loading) {
+    return (
+      <div className="flex justify-center items-center h-screen text-gray-400">
+        Loading user settings...
+      </div>
+    );
+  }
 
   const sidebarCurrentWidth = sidebarExpanded ? 160 : 60;
 

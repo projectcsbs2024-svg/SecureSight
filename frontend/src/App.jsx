@@ -14,6 +14,7 @@ import ForgotPassword from "./components/ForgotPassword";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { auth } from "./firebase";
 import { onAuthStateChanged, signOut } from "firebase/auth";
+import { useAuthToken } from "./auth/useAuthToken";
 
 // PrivateRoute component
 function PrivateRoute({ children }) {
