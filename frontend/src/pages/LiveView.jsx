@@ -40,7 +40,7 @@ const handleAddCamera = async (cameraData) => {
   try {
     let streamUrl = cameraData.src;
 
-    // If the cameraData.src is a File object (from file upload), upload it first
+    // If the cameraData.file exists (from file upload), upload it first
     if (cameraData.file) {
       const formData = new FormData();
       formData.append("file", cameraData.file);
@@ -52,12 +52,14 @@ const handleAddCamera = async (cameraData) => {
       streamUrl = `http://127.0.0.1:8000${uploadRes.data.url}`;
     }
 
-    // Post the camera data to the backend
+    // Post camera data to backend with all fields
     const res = await api.post("/cameras/", {
       name: cameraData.name,
-      latitude: cameraData.latitude,
-      longitude: cameraData.longitude,
+      latitude: cameraData.latitude || null,
+      longitude: cameraData.longitude || null,
+      location: cameraData.location || null,
       stream_url: streamUrl,
+      detections_enabled: cameraData.detections_enabled || ["weapon"], // default weapon
     });
 
     setCameras((prev) => [...prev, res.data]);

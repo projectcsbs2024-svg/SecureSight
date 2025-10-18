@@ -7,6 +7,12 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
   const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
 
+  // New fields
+  const [name, setName] = useState("");
+  const [latitude, setLatitude] = useState("");
+  const [longitude, setLongitude] = useState("");
+  const [location, setLocation] = useState("");
+
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
     if (selected) setFile(selected);
@@ -25,7 +31,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           headers: { "Content-Type": "multipart/form-data" },
         });
 
-        // Use the permanent backend URL
         streamUrl = `http://127.0.0.1:8000${res.data.url}`;
       } catch (err) {
         console.error("File upload failed:", err);
@@ -37,12 +42,18 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
       }
     }
 
-    // Add camera using backend
+    if (!name) {
+      alert("Camera name is required");
+      return;
+    }
+
     const newCamera = {
-      name: `Camera ${Math.floor(Math.random() * 1000)}`,
-      latitude: 22.57,
-      longitude: 88.36,
+      name,
+      latitude: latitude ? parseFloat(latitude) : null,
+      longitude: longitude ? parseFloat(longitude) : null,
+      location: location || null,
       src: streamUrl,
+      detections_enabled: ["weapon"], // default only weapon
     };
 
     onAdd(newCamera);
@@ -55,6 +66,36 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
         <h2 className="text-xl font-semibold mb-4 text-center text-primary">
           Add Camera Feed
         </h2>
+
+        {/* Camera info inputs */}
+        <input
+          type="text"
+          placeholder="Camera Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Latitude"
+          value={latitude}
+          onChange={(e) => setLatitude(e.target.value)}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Longitude"
+          value={longitude}
+          onChange={(e) => setLongitude(e.target.value)}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Location"
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-4"
+        />
 
         {/* Mode Toggle */}
         <div className="flex justify-center space-x-4 mb-4">
@@ -112,9 +153,9 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           </button>
           <button
             onClick={handleAdd}
-            disabled={uploading || ((mode === "file" && !file) || (mode === "url" && !url))}
+            disabled={uploading || !name || ((mode === "file" && !file) || (mode === "url" && !url))}
             className={`px-4 py-2 rounded-lg ${
-              uploading || ((mode === "file" && !file) || (mode === "url" && !url))
+              uploading || !name || ((mode === "file" && !file) || (mode === "url" && !url))
                 ? "bg-gray-500 cursor-not-allowed"
                 : "bg-primary hover:bg-teal-600"
             }`}

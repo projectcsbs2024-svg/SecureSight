@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
 from app.models import Camera
-from typing import Optional
+from typing import Optional, List
 from app.routes.auth import get_current_user
 import shutil
 import os
@@ -14,19 +14,25 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# Pydantic model for creating/updating cameras
+# ----------------------
+# Pydantic models
+# ----------------------
 class CameraCreate(BaseModel):
     name: str
     latitude: Optional[float] = None
     longitude: Optional[float] = None
+    location: Optional[str] = None
     stream_url: Optional[str] = None
+    detections_enabled: Optional[List[str]] = ["weapon"]  # default to weapon
 
 class CameraUpdate(BaseModel):
-    name: str = None
-    latitude: float = None
-    longitude: float = None
-    status: str = None
-    stream_url: str = None
+    name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location: Optional[str] = None
+    status: Optional[str] = None
+    stream_url: Optional[str] = None
+    detections_enabled: Optional[List[str]] = None
 
 # ----------------------
 # Upload video endpoint
@@ -44,20 +50,22 @@ async def upload_video(file: UploadFile = File(...)):
 # ----------------------
 @router.post("/")
 def add_camera(
-    camera: CameraCreate,  # receive as JSON body
+    camera: CameraCreate,
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     last_camera = db.query(Camera).filter(Camera.user_id == user.id).order_by(Camera.id.desc()).first()
-    new_id = f"CAM{int(last_camera.id.replace('CAM',''))+1:03d}" if last_camera else "CAM001"
+    new_id = str(int(last_camera.id) + 1) if last_camera else "1"  # numeric ID only
 
     new_camera = Camera(
         id=new_id,
         name=camera.name,
         latitude=camera.latitude,
         longitude=camera.longitude,
+        location=camera.location,
         stream_url=camera.stream_url,
-        user_id=user.id
+        user_id=user.id,
+        detections_enabled=camera.detections_enabled or ["weapon"]
     )
 
     db.add(new_camera)
@@ -66,7 +74,7 @@ def add_camera(
     return new_camera
 
 # ----------------------
-# Get all cameras for current user
+# Get all cameras
 # ----------------------
 @router.get("/")
 def get_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
@@ -74,38 +82,37 @@ def get_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
     return cameras
 
 # ----------------------
-# Update a camera
+# Update camera
 # ----------------------
 @router.put("/{camera_id}")
-def update_camera(camera_id: int, camera: CameraUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
+def update_camera(camera_id: str, camera: CameraUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
     db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    if camera.name is not None:
-        db_camera.name = camera.name
-    if camera.latitude is not None:
-        db_camera.latitude = camera.latitude
-    if camera.longitude is not None:
-        db_camera.longitude = camera.longitude
-    if camera.status is not None:
-        db_camera.status = camera.status
-    if camera.stream_url is not None:
-        db_camera.stream_url = camera.stream_url
+    for field in ["name", "latitude", "longitude", "location", "status", "stream_url", "detections_enabled"]:
+        value = getattr(camera, field)
+        if value is not None:
+            setattr(db_camera, field, value)
 
     db.commit()
-    db.refresh(db_camera)
-    return db_camera
+    db.r
 
 # ----------------------
-# Delete a camera
+# Delete camera
 # ----------------------
 @router.delete("/{camera_id}")
 def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
     db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
-
+    
+    # Optional: remove uploaded video file if exists
+    if db_camera.stream_url and db_camera.stream_url.startswith("/videos/"):
+        file_path = os.path.join("uploads", os.path.basename(db_camera.stream_url))
+        if os.path.exists(file_path):
+            os.remove(file_path)
+    
     db.delete(db_camera)
     db.commit()
-    return {"detail": "Camera deleted successfully"}
+    return {"message": "Camera deleted successfully"}
