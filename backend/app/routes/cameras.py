@@ -1,69 +1,88 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
-from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models import Camera
-from app.routes.auth import get_current_user
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
-from app.models import UserSetting
+from app.models import Camera
+from typing import Optional
 from app.routes.auth import get_current_user
-
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
-@router.post("/")
-def add_camera(name: str, latitude: float, longitude: float,
-               user=Depends(get_current_user), db: Session = Depends(get_db)):
-    # Generate camera_id like CAM001
-    last_camera = db.query(Camera).filter(Camera.user_id == user.id).order_by(Camera.id.desc()).first()
-    if last_camera:
-        last_id = int(last_camera.id.replace("CAM", ""))
-        new_id = f"CAM{last_id + 1:03d}"
-    else:
-        new_id = "CAM001"
+# Pydantic model for creating/updating cameras
+class CameraCreate(BaseModel):
+    name: str
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    stream_url: Optional[str] = None
 
-    camera = Camera(
+class CameraUpdate(BaseModel):
+    name: str = None
+    latitude: float = None
+    longitude: float = None
+    status: str = None
+    stream_url: str = None
+
+# Add a new camera
+@router.post("/")
+def add_camera(
+    camera: CameraCreate,  # receive as JSON body
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    last_camera = db.query(Camera).filter(Camera.user_id == user.id).order_by(Camera.id.desc()).first()
+    new_id = f"CAM{int(last_camera.id.replace('CAM',''))+1:03d}" if last_camera else "CAM001"
+
+    new_camera = Camera(
         id=new_id,
-        name=name,
-        latitude=latitude,
-        longitude=longitude,
+        name=camera.name,
+        latitude=camera.latitude,
+        longitude=camera.longitude,
+        stream_url=camera.stream_url,
         user_id=user.id
     )
-    db.add(camera)
-    db.commit()
-    db.refresh(camera)
-    return camera
 
+    db.add(new_camera)
+    db.commit()
+    db.refresh(new_camera)
+    return new_camera
+
+
+
+# Get all cameras for current user
 @router.get("/")
 def get_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
     cameras = db.query(Camera).filter(Camera.user_id == user.id).all()
     return cameras
 
+# Update a camera
 @router.put("/{camera_id}")
-def update_camera(camera_id: str, name: str = None, latitude: float = None,
-                  longitude: float = None, status: str = None,
-                  user=Depends(get_current_user), db: Session = Depends(get_db)):
-    camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
-    if not camera:
+def update_camera(camera_id: int, camera: CameraUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
+    if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    if name: camera.name = name
-    if latitude: camera.latitude = latitude
-    if longitude: camera.longitude = longitude
-    if status: camera.status = status
+    if camera.name is not None:
+        db_camera.name = camera.name
+    if camera.latitude is not None:
+        db_camera.latitude = camera.latitude
+    if camera.longitude is not None:
+        db_camera.longitude = camera.longitude
+    if camera.status is not None:
+        db_camera.status = camera.status
+    if camera.stream_url is not None:
+        db_camera.stream_url = camera.stream_url
 
     db.commit()
-    db.refresh(camera)
-    return camera
+    db.refresh(db_camera)
+    return db_camera
 
+# Delete a camera
 @router.delete("/{camera_id}")
-def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
-    camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
-    if not camera:
+def delete_camera(camera_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
+    if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    db.delete(camera)
+    db.delete(db_camera)
     db.commit()
     return {"detail": "Camera deleted successfully"}

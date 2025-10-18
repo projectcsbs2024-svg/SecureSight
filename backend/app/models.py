@@ -35,10 +35,13 @@ class UserSetting(Base):
 class Camera(Base):
     __tablename__ = "cameras"
 
-    id = Column(Integer, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True)
     name = Column(String, nullable=False)
+    latitude = Column(Float, nullable=True)     # added
+    longitude = Column(Float, nullable=True)    # added
     location = Column(String, nullable=True)
     stream_url = Column(String, nullable=True)
+    status = Column(String, default="online")  # e.g. 'online', 'offline'
     created_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"))
 
