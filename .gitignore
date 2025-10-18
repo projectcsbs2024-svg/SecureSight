@@ -13,20 +13,17 @@ frontend/.turbo/
 # ========================
 backend/__pycache__/
 backend/venv/
+backend/app/routes/__pycache__/
 backend/.env
 backend/*.pyc
 backend/.pytest_cache/
 backend/.DS_Store
-<<<<<<< HEAD
-backend/serviceAccountKey.json  # Firebase admin secret
-=======
 backend/app/serviceAccountKey.json  # Firebase admin secret
 serviceAccountKey.json
 app/serviceAccountKey.json
 *.json
 
 
->>>>>>> backend
 
 # ========================
 # OS / Misc
@@ -34,8 +31,5 @@ app/serviceAccountKey.json
 .DS_Store
 Thumbs.db
 *.log
-<<<<<<< HEAD
-=======
 
 
->>>>>>> backend
