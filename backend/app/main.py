@@ -1,8 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.routes import auth, cameras, detections, settings
+from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="SecureSight Backend")
+
+app.mount("/videos", StaticFiles(directory="uploads"), name="videos")
 
 # CORS
 origins = [

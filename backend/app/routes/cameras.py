@@ -1,12 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
 from app.models import Camera
 from typing import Optional
 from app.routes.auth import get_current_user
+import shutil
+import os
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
+
+# Directory to store uploaded videos
+UPLOAD_DIR = "uploads"
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 # Pydantic model for creating/updating cameras
 class CameraCreate(BaseModel):
@@ -22,7 +28,20 @@ class CameraUpdate(BaseModel):
     status: str = None
     stream_url: str = None
 
+# ----------------------
+# Upload video endpoint
+# ----------------------
+@router.post("/upload/")
+async def upload_video(file: UploadFile = File(...)):
+    file_path = os.path.join(UPLOAD_DIR, file.filename)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    # Return a URL that can be accessed via browser
+    return {"filename": file.filename, "url": f"/videos/{file.filename}"}
+
+# ----------------------
 # Add a new camera
+# ----------------------
 @router.post("/")
 def add_camera(
     camera: CameraCreate,  # receive as JSON body
@@ -46,15 +65,17 @@ def add_camera(
     db.refresh(new_camera)
     return new_camera
 
-
-
+# ----------------------
 # Get all cameras for current user
+# ----------------------
 @router.get("/")
 def get_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
     cameras = db.query(Camera).filter(Camera.user_id == user.id).all()
     return cameras
 
+# ----------------------
 # Update a camera
+# ----------------------
 @router.put("/{camera_id}")
 def update_camera(camera_id: int, camera: CameraUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
     db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
@@ -76,9 +97,11 @@ def update_camera(camera_id: int, camera: CameraUpdate, user=Depends(get_current
     db.refresh(db_camera)
     return db_camera
 
+# ----------------------
 # Delete a camera
+# ----------------------
 @router.delete("/{camera_id}")
-def delete_camera(camera_id: int, user=Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = Depends(get_db)):
     db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
