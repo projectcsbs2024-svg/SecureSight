@@ -1,50 +1,61 @@
-from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text
 from sqlalchemy.orm import relationship
-from .database import Base
 from datetime import datetime
+from app.database import Base
+
 
 class User(Base):
     __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    firebase_uid = Column(String, unique=True, index=True)  # Link to Firebase Auth
-    email = Column(String, unique=True)
 
-    cameras = relationship("Camera", back_populates="owner")
-    settings = relationship("UserSetting", back_populates="owner", uselist=False)
+    id = Column(Integer, primary_key=True, index=True)
+    firebase_uid = Column(String, unique=True, index=True)
+    email = Column(String, unique=True, index=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-class Camera(Base):
-    __tablename__ = "cameras"
-    id = Column(String, primary_key=True)  # CAM001
-    user_id = Column(Integer, ForeignKey("users.id"))
-    name = Column(String)
-    latitude = Column(Float)
-    longitude = Column(Float)
-    weapon = Column(Boolean, default=False)
-    scuffle = Column(Boolean, default=False)
-    stampede = Column(Boolean, default=False)
-    status = Column(String, default="active")
+    # relationships
+    settings = relationship("UserSetting", back_populates="user", uselist=False)
+    cameras = relationship("Camera", back_populates="user")
+    detections = relationship("Detection", back_populates="user")
 
-    owner = relationship("User", back_populates="cameras")
-    detections = relationship("Detection", back_populates="camera")
-
-class Detection(Base):
-    __tablename__ = "detections"
-    id = Column(String, primary_key=True)  # CAM001_1
-    camera_id = Column(String, ForeignKey("cameras.id"))
-    confidence = Column(Float)
-    time = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="active")
-    action = Column(String)  # photo/video URL
-
-    camera = relationship("Camera", back_populates="detections")
 
 class UserSetting(Base):
     __tablename__ = "user_settings"
-    id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
-    alert_emails = Column(String)  # comma-separated
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    alert_emails = Column(String, nullable=True)  # store as comma-separated string
     weapon_threshold = Column(Float, default=0.8)
     scuffle_threshold = Column(Float, default=0.7)
     stampede_threshold = Column(Float, default=0.75)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
-    owner = relationship("User", back_populates="settings")
+    user = relationship("User", back_populates="settings")
+
+class Camera(Base):
+    __tablename__ = "cameras"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    location = Column(String, nullable=True)
+    stream_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(Integer, ForeignKey("users.id"))
+
+    user = relationship("User", back_populates="cameras")
+    detections = relationship("Detection", back_populates="camera")
+
+
+class Detection(Base):
+    __tablename__ = "detections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    camera_id = Column(Integer, ForeignKey("cameras.id"))
+    user_id = Column(Integer, ForeignKey("users.id"))
+    detection_type = Column(String, nullable=False)  # e.g. 'weapon', 'violence', 'crowd'
+    confidence = Column(Float, nullable=False)
+    image_url = Column(Text, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow)
+
+    camera = relationship("Camera", back_populates="detections")
+    user = relationship("User", back_populates="detections")

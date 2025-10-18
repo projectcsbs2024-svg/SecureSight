@@ -1,41 +1,15 @@
 // src/pages/Settings.jsx
-import { useEffect , useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
 import { Trash2 } from "lucide-react";
 import api from "../apiHandle/api";
-import { fetchUserSettings } from "../apiHandle/userSettings"; // your API call
 
 export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
-
-  useEffect(() => {
-    const loadUserSettings = async () => {
-      try {
-        setLoading(true);
-        const data = await fetchUserSettings();
-
-        // data should match backend response: { alert_email, weapon_threshold, scuffle_threshold, stamped_threshold }
-        setAlertEmails(data.alert_email || []);
-        setThresholds({
-          weapon: Math.round((data.weapon_threshold || 0.5) * 100),
-          scuffle: Math.round((data.scuffle_threshold || 0.5) * 100),
-          stampede: Math.round((data.stamped_threshold || 0.5) * 100),
-        });
-      } catch (err) {
-        console.error("Failed to load user settings:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    loadUserSettings();
-  }, []);
-
-  // Alert recipients
- const [alertEmails, setAlertEmails] = useState([]);
+  const [alertEmails, setAlertEmails] = useState([]);
   const [thresholds, setThresholds] = useState({
     weapon: 50,
     scuffle: 50,
@@ -43,58 +17,69 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   });
   const [loading, setLoading] = useState(true);
 
-    // Add new email
-  const addAlertEmail = () => {
-    setAlertEmails([...alertEmails, ""]);
-  };
+  // Load user settings from backend
+  useEffect(() => {
+    const loadUserSettings = async () => {
+      if (!user) return;
+      try {
+        setLoading(true);
+        const token = await user.getIdToken();
+        const res = await api.get("/settings/", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
 
-  // Update email
-  const updateAlertEmail = (index, value) => {
-    const updated = [...alertEmails];
-    updated[index] = value;
-    setAlertEmails(updated);
-  };
-
-  // Delete email
-  const deleteAlertEmail = (index) => {
-    const updated = alertEmails.filter((_, i) => i !== index);
-    setAlertEmails(updated);
-  };
-
-  // Update detection threshold
-  const updateThreshold = (type, value) => {
-    setThresholds({ ...thresholds, [type]: parseInt(value) });
-  };
-
-  // Save settings (placeholder)
-  const handleSaveSettings = async () => {
-  if (!user) return;
-
-  const token = await user.getIdToken(); // Firebase ID token
-
-  try {
-    await api.post(
-      "/user_settings", // no /tokenid
-      {
-        alert_email: alertEmails,
-        weapon_threshold: thresholds.weapon / 100,
-        scuffle_threshold: thresholds.scuffle / 100,
-        stamped_threshold: thresholds.stampede / 100,
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${token}`, // send token in header
-        },
+        const data = res.data;
+        setAlertEmails(data.alert_emails || []);
+        setThresholds({
+          weapon: Math.round((data.weapon_threshold || 0.8) * 100),
+          scuffle: Math.round((data.scuffle_threshold || 0.7) * 100),
+          stampede: Math.round((data.stampede_threshold || 0.75) * 100),
+        });
+      } catch (err) {
+        console.error("Failed to fetch settings:", err);
+      } finally {
+        setLoading(false);
       }
-    );
-    alert("Settings saved!");
-  } catch (err) {
-    console.error("Failed to save settings:", err);
-    alert("Error saving settings.");
-  }
-};
+    };
+    loadUserSettings();
+  }, [user]);
 
+  // Update alert emails
+  const addAlertEmail = () => setAlertEmails([...alertEmails, ""]);
+  const updateAlertEmail = (i, val) => {
+    const updated = [...alertEmails];
+    updated[i] = val;
+    setAlertEmails(updated);
+  };
+  const deleteAlertEmail = (i) =>
+    setAlertEmails(alertEmails.filter((_, idx) => idx !== i));
 
+  // Update detection thresholds
+  const updateThreshold = (type, val) => {
+    setThresholds({ ...thresholds, [type]: parseInt(val) });
+  };
+
+  // Save settings to backend
+  const handleSaveSettings = async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      await api.post(
+        "/settings/",
+        {
+          alert_emails: alertEmails,
+          weapon_threshold: thresholds.weapon / 100,
+          scuffle_threshold: thresholds.scuffle / 100,
+          stampede_threshold: thresholds.stampede / 100,
+        },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert("Settings saved successfully!");
+    } catch (err) {
+      console.error("Error saving settings:", err);
+      alert("Failed to save settings.");
+    }
+  };
 
   if (!user || loading) {
     return (
@@ -129,37 +114,46 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
         >
           <h1 className="text-2xl font-semibold mb-6 text-white">Settings</h1>
 
-          {/* Alert Message Settings */}
+          {/* Alert Email Settings */}
           <div className="bg-gray-800 rounded-xl shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4 text-white">Alert Message Settings</h2>
+            <h2 className="text-xl font-semibold mb-4 text-white">
+              Alert Recipients
+            </h2>
             {alertEmails.map((email, index) => (
               <div key={index} className="flex items-center gap-2 mb-2">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => updateAlertEmail(index, e.target.value)}
-                  className="border rounded px-2 py-1 flex-1 bg-gray-700 text-white placeholder-gray-400"
+                  className="border rounded px-2 py-1 flex-1 bg-gray-700 text-white"
                   placeholder="Enter email address"
                 />
-                <button onClick={() => deleteAlertEmail(index)} className="p-1 hover:text-red-500">
+                <button
+                  onClick={() => deleteAlertEmail(index)}
+                  className="p-1 hover:text-red-500"
+                >
                   <Trash2 size={18} />
                 </button>
               </div>
             ))}
             <button
               onClick={addAlertEmail}
-              className="bg-blue-600 text-white px-3 py-1 rounded flex items-center gap-2 mt-2 hover:bg-blue-700"
+              className="bg-blue-600 text-white px-3 py-1 rounded mt-2 hover:bg-blue-700"
             >
               Add Email
             </button>
           </div>
 
-          {/* Detection Model Sensitivity */}
+          {/* Detection Sensitivity */}
           <div className="bg-gray-800 rounded-xl shadow-md p-6 mb-6">
-            <h2 className="text-xl font-semibold mb-4 text-white">Detection Model Sensitivity</h2>
+            <h2 className="text-xl font-semibold mb-4 text-white">
+              Detection Model Sensitivity
+            </h2>
             {["weapon", "scuffle", "stampede"].map((type) => (
               <div key={type} className="flex items-center gap-4 mb-4">
-                <label className="w-40 capitalize text-gray-300">{type} threshold</label>
+                <label className="w-40 capitalize text-gray-300">
+                  {type} threshold
+                </label>
                 <input
                   type="range"
                   min="0"
@@ -168,12 +162,13 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
                   onChange={(e) => updateThreshold(type, e.target.value)}
                   className="flex-1"
                 />
-                <span className="text-gray-400 w-12 text-right">{thresholds[type]}%</span>
+                <span className="text-gray-400 w-12 text-right">
+                  {thresholds[type]}%
+                </span>
               </div>
             ))}
           </div>
 
-          {/* Save Button */}
           <div className="flex justify-end">
             <button
               onClick={handleSaveSettings}

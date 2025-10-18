@@ -1,11 +1,18 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
-from ..database import get_db
-from ..models import Detection, Camera
-from ..routes.auth import get_current_user
+from app.database import get_db
+from app.models import Detection, Camera
+from app.routes.auth import get_current_user
 from datetime import datetime
 import os
 import shutil
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from app.database import get_db
+from app.models import UserSetting
+from app.routes.auth import get_current_user
+
 
 router = APIRouter(prefix="/detections", tags=["Detections"])
 

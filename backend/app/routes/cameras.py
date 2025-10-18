@@ -1,8 +1,15 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy.orm import Session
-from ..database import get_db
-from ..models import Camera
-from ..routes.auth import get_current_user
+from app.database import get_db
+from app.models import Camera
+from app.routes.auth import get_current_user
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from pydantic import BaseModel
+from app.database import get_db
+from app.models import UserSetting
+from app.routes.auth import get_current_user
+
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
