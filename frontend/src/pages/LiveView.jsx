@@ -6,6 +6,7 @@ import { AlertCard } from "../components/AlertCard";
 import { useAuth } from "../context/AuthContext";
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
+import api from "../apiHandle/api.jsx";
 
 export default function LiveView() {
   const [cameras, setCameras] = useState([]);
@@ -15,43 +16,78 @@ export default function LiveView() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
+  // Redirect if not logged in
   useEffect(() => {
     if (!user) navigate("/");
   }, [user, navigate]);
 
+  // Fetch cameras from backend
   useEffect(() => {
-    const saved = localStorage.getItem("cameras");
-    if (saved) setCameras(JSON.parse(saved));
+    const fetchCameras = async () => {
+      try {
+        const res = await api.get("/cameras/");
+        setCameras(res.data);
+      } catch (err) {
+        console.error("Failed to fetch cameras:", err);
+      }
+    };
+    fetchCameras();
   }, []);
 
-  useEffect(() => {
-    localStorage.setItem("cameras", JSON.stringify(cameras));
-  }, [cameras]);
+  // Add new camera (backend + update state)
+  // Add new camera (backend + update state)
+const handleAddCamera = async (cameraData) => {
+  try {
+    let streamUrl = cameraData.src;
 
-  const handleAddCamera = (fileUrl) => {
-    const newCam = {
-      id: Date.now(),
-      src: fileUrl,
-      name: `Camera ${cameras.length + 1}`,
-      status: Math.random() > 0.2 ? "online" : "offline",
-    };
-    setCameras((prev) => [...prev, newCam]);
-  };
+    // If the cameraData.src is a File object (from file upload), upload it first
+    if (cameraData.file) {
+      const formData = new FormData();
+      formData.append("file", cameraData.file);
 
-  const handleDeleteCamera = (id) => {
-    if (window.confirm("Are you sure you want to delete this camera?")) {
+      const uploadRes = await api.post("/cameras/upload/", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+
+      streamUrl = `http://127.0.0.1:8000${uploadRes.data.url}`;
+    }
+
+    // Post the camera data to the backend
+    const res = await api.post("/cameras/", {
+      name: cameraData.name,
+      latitude: cameraData.latitude,
+      longitude: cameraData.longitude,
+      stream_url: streamUrl,
+    });
+
+    setCameras((prev) => [...prev, res.data]);
+  } catch (err) {
+    console.error("Failed to add camera:", err);
+    alert("Error adding camera");
+  }
+};
+
+
+
+  // Delete camera
+  const handleDeleteCamera = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this camera?")) return;
+    try {
+      await api.delete(`/cameras/${id}`);
       setCameras((prev) => prev.filter((cam) => cam.id !== id));
+    } catch (err) {
+      console.error("Failed to delete camera:", err);
+      alert("Error deleting camera");
     }
   };
 
   const totalAlerts = 12;
-  const activeCameras = cameras.filter((c) => c.status === "online").length;
+  const activeCameras = cameras.length;
   const currentAlerts = 3;
 
-  // Sidebar and alert widths
   const sidebarWidth = sidebarExpanded ? 160 : 60;
   const alertWidth = alertCollapsed ? 64 : 288;
-  const navbarHeight = 64; // px
+  const navbarHeight = 64;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -65,16 +101,13 @@ export default function LiveView() {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col">
-        {/* Navbar */}
         <Navbar userEmail={user?.email} />
-
-        {/* Camera grid */}
         <div
           className="flex-1 overflow-auto p-4 transition-all duration-300 z-0"
           style={{
             marginLeft: sidebarWidth,
-            paddingTop: navbarHeight+10,
-            marginRight: alertCollapsed ? 64 : 288, // just a margin to prevent overlap
+            paddingTop: navbarHeight + 10,
+            marginRight: alertWidth,
           }}
         >
           <div
@@ -91,18 +124,19 @@ export default function LiveView() {
               cameras.map((cam) => (
                 <CameraFeed
                   key={cam.id}
-                  src={cam.src}
+                  src={cam.stream_url || ""}  // use stream_url
                   name={cam.name}
-                  status={cam.status}
+                  status={cam.status || "online"}
                   onDelete={() => handleDeleteCamera(cam.id)}
                 />
+
               ))
             )}
           </div>
         </div>
       </div>
 
-      {/* Fixed Right Panel: AlertCard */}
+      {/* Alert Panel */}
       <AlertCard
         totalAlerts={totalAlerts}
         activeCameras={activeCameras}

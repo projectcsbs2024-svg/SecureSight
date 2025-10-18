@@ -22,6 +22,7 @@ backend/app/serviceAccountKey.json  # Firebase admin secret
 serviceAccountKey.json
 app/serviceAccountKey.json
 *.json
+backend/uploads/
 
 
 

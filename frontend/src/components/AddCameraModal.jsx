@@ -1,21 +1,52 @@
 import { useState } from "react";
+import api from "../apiHandle/api.jsx";
 
 export const AddCameraModal = ({ onAdd, onClose }) => {
   const [mode, setMode] = useState("file");
   const [file, setFile] = useState(null);
   const [url, setUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
-    if (selected) setFile(URL.createObjectURL(selected));
+    if (selected) setFile(selected);
   };
 
-  const handleAdd = () => {
-    const src = mode === "file" ? file : url;
-    if (src) {
-      onAdd(src);
-      onClose();
+  const handleAdd = async () => {
+    let streamUrl = url;
+
+    if (mode === "file" && file) {
+      try {
+        setUploading(true);
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const res = await api.post("/cameras/upload/", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+        });
+
+        // Use the permanent backend URL
+        streamUrl = `http://127.0.0.1:8000${res.data.url}`;
+      } catch (err) {
+        console.error("File upload failed:", err);
+        alert("Failed to upload file");
+        setUploading(false);
+        return;
+      } finally {
+        setUploading(false);
+      }
     }
+
+    // Add camera using backend
+    const newCamera = {
+      name: `Camera ${Math.floor(Math.random() * 1000)}`,
+      latitude: 22.57,
+      longitude: 88.36,
+      src: streamUrl,
+    };
+
+    onAdd(newCamera);
+    onClose();
   };
 
   return (
@@ -55,7 +86,11 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
               className="block w-full text-sm text-gray-300 mb-4"
             />
             {file && (
-              <video src={file} className="w-full rounded-lg mb-3" controls />
+              <video
+                src={URL.createObjectURL(file)}
+                className="w-full rounded-lg mb-3"
+                controls
+              />
             )}
           </>
         ) : (
@@ -77,14 +112,14 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           </button>
           <button
             onClick={handleAdd}
-            disabled={mode === "file" ? !file : !url}
+            disabled={uploading || ((mode === "file" && !file) || (mode === "url" && !url))}
             className={`px-4 py-2 rounded-lg ${
-              (mode === "file" && file) || (mode === "url" && url)
-                ? "bg-primary hover:bg-teal-600"
-                : "bg-gray-500 cursor-not-allowed"
+              uploading || ((mode === "file" && !file) || (mode === "url" && !url))
+                ? "bg-gray-500 cursor-not-allowed"
+                : "bg-primary hover:bg-teal-600"
             }`}
           >
-            Add
+            {uploading ? "Uploading..." : "Add"}
           </button>
         </div>
       </div>
