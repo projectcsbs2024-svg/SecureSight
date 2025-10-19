@@ -24,7 +24,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
       try {
         const res = await api.get("/cameras/");
         const formatted = res.data.map(cam => {
-          const detections = cam.detections_enabled || []; // default to empty array
+          const detections = cam.detections_enabled || [];
           return {
             id: cam.id,
             name: cam.name,
@@ -37,7 +37,8 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
             createdAt: cam.created_at?.split("T")[0],
             stream_url: cam.stream_url,
             status: cam.status,
-            detections_enabled: detections, // keep original array for edits
+            detections_enabled: detections,
+            rawCamera: cam, // <-- raw backend object for editing
           };
         });
         setCameras(formatted);
@@ -52,7 +53,6 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
   // Add new camera
   const handleAddCamera = (camera) => {
-    // Ensure detections_enabled exists
     const detections = camera.detections_enabled || [];
     const formatted = {
       ...camera,
@@ -62,6 +62,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         stampede: detections.includes("stampede"),
       },
       detections_enabled: detections,
+      rawCamera: camera, // save raw object
     };
     setCameras(prev => [...prev, formatted]);
     setShowAddModal(false);
@@ -79,9 +80,11 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
       const body = {
         name: updatedCamera.name,
-        location: updatedCamera.location || updatedCamera.gps,
+        latitude: updatedCamera.latitude,
+        longitude: updatedCamera.longitude,
+        location: updatedCamera.location,
         detections_enabled: Object.entries(detectionObj)
-          .filter(([k, v]) => v)
+          .filter(([_, v]) => v)
           .map(([k]) => k),
       };
 
@@ -95,13 +98,14 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
             ? {
                 ...c,
                 name: cam.name,
-                gps: cam.location,
+                gps: cam.location || `${cam.latitude}, ${cam.longitude}`,
                 detection: {
                   weapon: updatedDetections.includes("weapon"),
                   scuffle: updatedDetections.includes("scuffle"),
                   stampede: updatedDetections.includes("stampede"),
                 },
                 detections_enabled: updatedDetections,
+                rawCamera: cam, // update raw object
               }
             : c
         )
@@ -204,7 +208,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
                     </td>
                     <td className="px-4 py-3 flex gap-2">
                       <button
-                        onClick={() => setEditingCamera(cam)}
+                        onClick={() => setEditingCamera(cam.rawCamera || cam)} // pass raw object
                         className="bg-blue-500 text-white px-2 py-1 rounded flex items-center gap-1"
                       >
                         <Edit2 size={14} /> Edit
