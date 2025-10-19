@@ -1,32 +1,43 @@
-// src/components/EditCameraModal.jsx
 import { useState, useEffect } from "react";
 
 export const EditCameraModal = ({ camera, onSave, onClose }) => {
   const [cameraData, setCameraData] = useState({
     name: "",
-    gps: "",
-    detection: { weapon: false, scuffle: false, stampede: false },
+    latitude: "",
+    longitude: "",
+    location: "",
+    detections_enabled: [],
   });
 
   useEffect(() => {
     if (camera) {
-      setCameraData(camera);
+      setCameraData({
+        name: camera.name || "",
+        latitude: camera.latitude || "",
+        longitude: camera.longitude || "",
+        location: camera.location || "",
+        detections_enabled: camera.detections_enabled || ["weapon"],
+      });
     }
   }, [camera]);
 
-  const updateField = (field, value) => {
-    setCameraData({ ...cameraData, [field]: value });
-  };
-
   const toggleDetection = (type) => {
-    setCameraData({
-      ...cameraData,
-      detection: { ...cameraData.detection, [type]: !cameraData.detection[type] },
+    setCameraData((prev) => {
+      const detections = prev.detections_enabled.includes(type)
+        ? prev.detections_enabled.filter((d) => d !== type)
+        : [...prev.detections_enabled, type];
+      return { ...prev, detections_enabled: detections };
     });
   };
 
   const handleSave = () => {
-    onSave(cameraData);
+    const payload = {
+      id: camera.id,
+      ...cameraData,
+      latitude: cameraData.latitude ? parseFloat(cameraData.latitude) : null,
+      longitude: cameraData.longitude ? parseFloat(cameraData.longitude) : null,
+    };
+    onSave(payload);
     onClose();
   };
 
@@ -39,60 +50,49 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
           Edit Camera
         </h2>
 
-        {/* Camera Name */}
-        <div className="mb-3">
-          <label className="block text-gray-200 mb-1">Camera Name</label>
-          <input
-            type="text"
-            value={cameraData.name}
-            onChange={(e) => updateField("name", e.target.value)}
-            className="w-full rounded px-2 py-1 bg-gray-700 text-gray-200"
-          />
-        </div>
+        <input
+          type="text"
+          placeholder="Camera Name"
+          value={cameraData.name}
+          onChange={(e) => setCameraData({ ...cameraData, name: e.target.value })}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Latitude"
+          value={cameraData.latitude}
+          onChange={(e) => setCameraData({ ...cameraData, latitude: e.target.value })}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Longitude"
+          value={cameraData.longitude}
+          onChange={(e) => setCameraData({ ...cameraData, longitude: e.target.value })}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2"
+        />
+        <input
+          type="text"
+          placeholder="Location"
+          value={cameraData.location}
+          onChange={(e) => setCameraData({ ...cameraData, location: e.target.value })}
+          className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-4"
+        />
 
-        {/* GPS Coordinates */}
-        <div className="mb-3">
-          <label className="block text-gray-200 mb-1">GPS Coordinates</label>
-          <input
-            type="text"
-            value={cameraData.gps}
-            onChange={(e) => updateField("gps", e.target.value)}
-            className="w-full rounded px-2 py-1 bg-gray-700 text-gray-200"
-          />
-        </div>
-
-        {/* Detection Settings */}
-        <div className="mb-4 text-gray-200">
-          <label className="block mb-1 font-semibold">Detection</label>
-          <div className="flex flex-col gap-2">
-            <label className="flex items-center gap-2">
+        <div className="text-gray-200 mb-4">
+          <label className="block mb-2 font-semibold">Detections</label>
+          {["weapon", "scuffle", "stampede"].map((type) => (
+            <label key={type} className="flex items-center gap-2 mb-1">
               <input
                 type="checkbox"
-                checked={cameraData.detection.weapon}
-                onChange={() => toggleDetection("weapon")}
+                checked={cameraData.detections_enabled.includes(type)}
+                onChange={() => toggleDetection(type)}
               />
-              Weapon
+              {type.charAt(0).toUpperCase() + type.slice(1)}
             </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={cameraData.detection.scuffle}
-                onChange={() => toggleDetection("scuffle")}
-              />
-              Scuffle
-            </label>
-            <label className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={cameraData.detection.stampede}
-                onChange={() => toggleDetection("stampede")}
-              />
-              Stampede
-            </label>
-          </div>
+          ))}
         </div>
 
-        {/* Action Buttons */}
         <div className="flex justify-end space-x-3">
           <button
             onClick={onClose}

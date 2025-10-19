@@ -54,11 +54,9 @@ def add_camera(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    last_camera = db.query(Camera).filter(Camera.user_id == user.id).order_by(Camera.id.desc()).first()
-    new_id = str(int(last_camera.id) + 1) if last_camera else "1"  # numeric ID only
-
+    import uuid
     new_camera = Camera(
-        id=new_id,
+        id=str(uuid.uuid4()),
         name=camera.name,
         latitude=camera.latitude,
         longitude=camera.longitude,
@@ -85,7 +83,12 @@ def get_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
 # Update camera
 # ----------------------
 @router.put("/{camera_id}")
-def update_camera(camera_id: str, camera: CameraUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
+def update_camera(
+    camera_id: str,
+    camera: CameraUpdate,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
@@ -96,7 +99,9 @@ def update_camera(camera_id: str, camera: CameraUpdate, user=Depends(get_current
             setattr(db_camera, field, value)
 
     db.commit()
-    db.r
+    db.refresh(db_camera)  # <-- fix here
+    return db_camera  # <-- return updated camera
+
 
 # ----------------------
 # Delete camera

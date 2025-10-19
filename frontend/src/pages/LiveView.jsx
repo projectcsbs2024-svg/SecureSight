@@ -34,42 +34,10 @@ export default function LiveView() {
     fetchCameras();
   }, []);
 
-  // Add new camera (backend + update state)
-  // Add new camera (backend + update state)
-const handleAddCamera = async (cameraData) => {
-  try {
-    let streamUrl = cameraData.src;
-
-    // If the cameraData.file exists (from file upload), upload it first
-    if (cameraData.file) {
-      const formData = new FormData();
-      formData.append("file", cameraData.file);
-
-      const uploadRes = await api.post("/cameras/upload/", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-
-      streamUrl = `http://127.0.0.1:8000${uploadRes.data.url}`;
-    }
-
-    // Post camera data to backend with all fields
-    const res = await api.post("/cameras/", {
-      name: cameraData.name,
-      latitude: cameraData.latitude || null,
-      longitude: cameraData.longitude || null,
-      location: cameraData.location || null,
-      stream_url: streamUrl,
-      detections_enabled: cameraData.detections_enabled || ["weapon"], // default weapon
-    });
-
-    setCameras((prev) => [...prev, res.data]);
-  } catch (err) {
-    console.error("Failed to add camera:", err);
-    alert("Error adding camera");
-  }
-};
-
-
+  // Add new camera (state update only — modal handles API)
+  const handleAddCamera = (newCameraFromBackend) => {
+    setCameras((prev) => [...prev, newCameraFromBackend]);
+  };
 
   // Delete camera
   const handleDeleteCamera = async (id) => {
@@ -126,12 +94,11 @@ const handleAddCamera = async (cameraData) => {
               cameras.map((cam) => (
                 <CameraFeed
                   key={cam.id}
-                  src={cam.stream_url || ""}  // use stream_url
+                  src={cam.stream_url || ""}
                   name={cam.name}
                   status={cam.status || "online"}
                   onDelete={() => handleDeleteCamera(cam.id)}
                 />
-
               ))
             )}
           </div>

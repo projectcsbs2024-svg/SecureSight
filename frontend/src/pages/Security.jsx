@@ -1,53 +1,128 @@
 // src/pages/Security.jsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
-import { FileText, Edit2 } from "lucide-react";
+import { Edit2, Trash2 } from "lucide-react"; // ✅ added Trash2
 import { AddCameraModal } from "../components/AddCameraModal";
 import { EditCameraModal } from "../components/EditCameraModal";
 import { jsPDF } from "jspdf";
+import api from "../apiHandle/api";
 
 export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [editingCamera, setEditingCamera] = useState(null); // state for EditCameraModal
+  const [editingCamera, setEditingCamera] = useState(null);
   const [exportFormat, setExportFormat] = useState("csv");
   const [exportStartDate, setExportStartDate] = useState("");
   const [exportEndDate, setExportEndDate] = useState("");
+  const [cameras, setCameras] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  // Cameras state
-  const [cameras, setCameras] = useState([
-    { id: 1, name: "Entrance Cam", gps: "28.6139° N, 77.2090° E", detection: { weapon: true, scuffle: true, stampede: false }, createdAt: "2025-10-01" },
-    { id: 2, name: "Lobby Cam", gps: "28.6140° N, 77.2085° E", detection: { weapon: true, scuffle: true, stampede: false }, createdAt: "2025-10-05" },
-    { id: 3, name: "Parking Lot Cam", gps: "28.6150° N, 77.2070° E", detection: { weapon: true, scuffle: true, stampede: false }, createdAt: "2025-10-07" },
-    { id: 4, name: "Backyard Cam", gps: "28.6160° N, 77.2060° E", detection: { weapon: true, scuffle: true, stampede: false }, createdAt: "2025-10-08" },
-  ]);
-
-  const totalCameras = cameras.length;
   const sidebarCurrentWidth = sidebarExpanded ? 160 : 60;
 
-  // Add Camera
-  const handleAddCamera = (src) => {
-    const newCamera = {
-      id: cameras.length + 1,
-      name: `New Camera`,
-      gps: "Unknown",
-      detection: { weapon: false, scuffle: false, stampede: false },
-      src,
-      createdAt: new Date().toISOString().split("T")[0],
+  useEffect(() => {
+    const fetchCameras = async () => {
+      try {
+        const res = await api.get("/cameras/");
+        const formatted = res.data.map(cam => ({
+          id: cam.id,
+          name: cam.name,
+          gps: cam.location || `${cam.latitude ?? "?"}, ${cam.longitude ?? "?"}`,
+          detection: {
+            weapon: cam.detections_enabled?.includes("weapon"),
+            scuffle: cam.detections_enabled?.includes("scuffle"),
+            stampede: cam.detections_enabled?.includes("stampede"),
+          },
+          createdAt: cam.created_at?.split("T")[0],
+        }));
+        setCameras(formatted);
+      } catch (err) {
+        console.error("Error fetching cameras:", err);
+      } finally {
+        setLoading(false);
+      }
     };
-    setCameras([...cameras, newCamera]);
+    if (user) fetchCameras();
+  }, [user]);
+
+  const handleAddCamera = (camera) => {
+    setCameras(prev => [
+      ...prev,
+      {
+        id: camera.id,
+        name: camera.name,
+        gps: camera.location || `${camera.latitude ?? "?"}, ${camera.longitude ?? "?"}`,
+        detection: {
+          weapon: camera.detections_enabled?.includes("weapon"),
+          scuffle: camera.detections_enabled?.includes("scuffle"),
+          stampede: camera.detections_enabled?.includes("stampede"),
+        },
+        createdAt: camera.created_at?.split("T")[0],
+      },
+    ]);
+    setShowAddModal(false);
   };
 
-  // Edit Camera
-  const handleSaveCamera = (updatedCamera) => {
-    setCameras(cameras.map(cam => cam.id === updatedCamera.id ? updatedCamera : cam));
-    setEditingCamera(null);
+  // ✅ Fixed handleSaveCamera
+  const handleSaveCamera = async (updatedCamera) => {
+    try {
+      // Transform detections_enabled array into detection object
+      const detectionObj = {
+        weapon: updatedCamera.detections_enabled?.includes("weapon") || false,
+        scuffle: updatedCamera.detections_enabled?.includes("scuffle") || false,
+        stampede: updatedCamera.detections_enabled?.includes("stampede") || false,
+      };
+
+      const body = {
+        name: updatedCamera.name,
+        location: updatedCamera.location || updatedCamera.gps,
+        detections_enabled: Object.entries(detectionObj)
+          .filter(([k, v]) => v)
+          .map(([k]) => k),
+      };
+
+      const res = await api.put(`/cameras/${updatedCamera.id}`, body);
+      const cam = res.data;
+
+      setCameras(prev =>
+        prev.map(c =>
+          c.id === cam.id
+            ? {
+                id: cam.id,
+                name: cam.name,
+                gps: cam.location,
+                detection: {
+                  weapon: cam.detections_enabled?.includes("weapon"),
+                  scuffle: cam.detections_enabled?.includes("scuffle"),
+                  stampede: cam.detections_enabled?.includes("stampede"),
+                },
+                createdAt: cam.created_at?.split("T")[0],
+              }
+            : c
+        )
+      );
+
+      setEditingCamera(null);
+    } catch (err) {
+      console.error("Error updating camera:", err);
+      alert("Failed to update camera");
+    }
   };
 
-  // Filter cameras for export
+  // ✅ Delete Camera
+  const handleDeleteCamera = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this camera?")) return;
+    try {
+      await api.delete(`/cameras/${id}`);
+      setCameras(prev => prev.filter(c => c.id !== id));
+    } catch (err) {
+      console.error("Error deleting camera:", err);
+      alert("Failed to delete camera");
+    }
+  };
+
   const filteredCameras = cameras.filter((cam) => {
     if (!exportStartDate && !exportEndDate) return true;
     const camDate = new Date(cam.createdAt);
@@ -58,10 +133,8 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     return true;
   });
 
-  // Download function
   const handleDownload = (format) => {
     if (!filteredCameras.length) return;
-
     const data = filteredCameras.map(cam => ({
       ID: cam.id,
       Name: cam.name,
@@ -88,18 +161,22 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
       const doc = new jsPDF();
       let y = 10;
       data.forEach(cam => {
-        doc.text(`ID: ${cam.ID}, Name: ${cam.Name}, GPS: ${cam.GPS}, Weapon: ${cam.Weapon}, Scuffle: ${cam.Scuffle}, Stampede: ${cam.Stampede}`, 10, y);
+        doc.text(
+          `ID: ${cam.ID}, Name: ${cam.Name}, GPS: ${cam.GPS}, Weapon: ${cam.Weapon}, Scuffle: ${cam.Scuffle}, Stampede: ${cam.Stampede}`,
+          10,
+          y
+        );
         y += 10;
       });
       doc.save("cameras.pdf");
     }
   };
 
-  if (!user) return <div className="flex justify-center items-center h-screen text-gray-500">Loading...</div>;
+  if (loading)
+    return <div className="flex justify-center items-center h-screen text-gray-500">Loading cameras...</div>;
 
   return (
     <div className="flex min-h-screen bg-gray-50">
-      {/* Sidebar */}
       <Sidebar
         setActivePage={() => {}}
         activePage="security"
@@ -107,21 +184,17 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         setIsExpanded={setSidebarExpanded}
       />
 
-      {/* Main Content */}
       <div
         className="flex-1 flex flex-col transition-all duration-300"
         style={{ marginLeft: sidebarCurrentWidth, height: "100vh" }}
       >
-        {/* Navbar */}
         <div className="fixed top-0 left-0 right-0 z-20">
           <Navbar userEmail={user?.email} />
         </div>
 
-        {/* Page Content */}
         <div className="flex-1 flex flex-col p-6 overflow-auto" style={{ marginTop: `${navbarHeight}px` }}>
-          {/* Total Cameras + Add Camera */}
           <div className="flex justify-between items-center mb-6">
-            <SummaryCard title="Total Cameras" value={totalCameras} color="green" />
+            <SummaryCard title="Total Cameras" value={cameras.length} color="green" />
             <button
               onClick={() => setShowAddModal(true)}
               className="bg-blue-500 text-white px-4 py-2 rounded flex items-center gap-2"
@@ -130,7 +203,6 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
             </button>
           </div>
 
-          {/* Export / Reports */}
           <div className="bg-white text-gray-800 shadow-md rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-center gap-2">
             <input type="date" className="border rounded px-2 py-1" value={exportStartDate} onChange={(e) => setExportStartDate(e.target.value)} />
             <input type="date" className="border rounded px-2 py-1" value={exportEndDate} onChange={(e) => setExportEndDate(e.target.value)} />
@@ -142,51 +214,38 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
             <button className="bg-green-500 text-white px-3 py-1 rounded" onClick={() => handleDownload(exportFormat)}>Download</button>
           </div>
 
-          {/* Camera Table */}
           <div className="bg-white rounded-xl shadow-md overflow-auto max-h-[500px]">
             <table className="min-w-full text-sm text-gray-700">
               <thead className="bg-gray-100 sticky top-0 z-20">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold">Camera Name</th>
-                  <th className="px-4 py-3 text-left font-semibold">GPS Coordinates</th>
+                  <th className="px-4 py-3 text-left font-semibold">GPS / Location</th>
                   <th className="px-4 py-3 text-left font-semibold">Detection</th>
-                  <th className="px-4 py-3 text-left font-semibold">Edit</th>
+                  <th className="px-4 py-3 text-left font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {cameras.map((cam) => (
                   <tr key={cam.id} className="border-b hover:bg-gray-50 transition">
-                    <td className="px-4 py-3 text-gray-900">{cam.name}</td>
-                    <td className="px-4 py-3 text-gray-900">{cam.gps}</td>
-                    <td className="px-4 py-3 text-gray-900 flex flex-col gap-1">
-                      <td className="px-4 py-3 text-gray-900 flex flex-col gap-1">
-                        <span>
-                            Weapon:{" "}
-                            <span className={cam.detection.weapon ? "text-green-500 font-bold" : "text-red-500 font-bold"}>
-                            {cam.detection.weapon ? "✔" : "✖"}
-                            </span>
-                        </span>
-                        <span>
-                            Scuffle:{" "}
-                            <span className={cam.detection.scuffle ? "text-green-500 font-bold" : "text-red-500 font-bold"}>
-                            {cam.detection.scuffle ? "✔" : "✖"}
-                            </span>
-                        </span>
-                        <span>
-                            Stampede:{" "}
-                            <span className={cam.detection.stampede ? "text-green-500 font-bold" : "text-red-500 font-bold"}>
-                            {cam.detection.stampede ? "✔" : "✖"}
-                            </span>
-                        </span>
-                        </td>
-
-                    </td>
+                    <td className="px-4 py-3">{cam.name}</td>
+                    <td className="px-4 py-3">{cam.gps}</td>
                     <td className="px-4 py-3">
+                      <span>Weapon: <b className={cam.detection.weapon ? "text-green-600" : "text-red-500"}>{cam.detection.weapon ? "✔" : "✖"}</b></span><br />
+                      <span>Scuffle: <b className={cam.detection.scuffle ? "text-green-600" : "text-red-500"}>{cam.detection.scuffle ? "✔" : "✖"}</b></span><br />
+                      <span>Stampede: <b className={cam.detection.stampede ? "text-green-600" : "text-red-500"}>{cam.detection.stampede ? "✔" : "✖"}</b></span>
+                    </td>
+                    <td className="px-4 py-3 flex gap-2">
                       <button
                         onClick={() => setEditingCamera(cam)}
                         className="bg-blue-500 text-white px-2 py-1 rounded flex items-center gap-1"
                       >
                         <Edit2 size={14} /> Edit
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCamera(cam.id)}
+                        className="bg-red-500 text-white px-2 py-1 rounded flex items-center gap-1"
+                      >
+                        <Trash2 size={14} /> Delete
                       </button>
                     </td>
                   </tr>
@@ -197,21 +256,12 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         </div>
       </div>
 
-      {/* Add Camera Modal */}
       {showAddModal && (
-        <AddCameraModal
-          onAdd={handleAddCamera}
-          onClose={() => setShowAddModal(false)}
-        />
+        <AddCameraModal onAdd={handleAddCamera} onClose={() => setShowAddModal(false)} />
       )}
 
-      {/* Edit Camera Modal */}
       {editingCamera && (
-        <EditCameraModal
-          camera={editingCamera}
-          onSave={handleSaveCamera}
-          onClose={() => setEditingCamera(null)}
-        />
+        <EditCameraModal camera={editingCamera} onSave={handleSaveCamera} onClose={() => setEditingCamera(null)} />
       )}
     </div>
   );

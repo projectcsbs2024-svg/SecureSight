@@ -7,7 +7,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
   const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
 
-  // New fields
   const [name, setName] = useState("");
   const [latitude, setLatitude] = useState("");
   const [longitude, setLongitude] = useState("");
@@ -24,14 +23,17 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
     if (mode === "file" && file) {
       try {
         setUploading(true);
+
         const formData = new FormData();
         formData.append("file", file);
 
-        const res = await api.post("/cameras/upload/", formData, {
+        // Upload video file first
+        const resUpload = await api.post("/cameras/upload/", formData, {
           headers: { "Content-Type": "multipart/form-data" },
         });
 
-        streamUrl = `http://127.0.0.1:8000${res.data.url}`;
+        // Get full URL from backend
+        streamUrl = `${import.meta.env.VITE_API_URL}${resUpload.data.url}`;
       } catch (err) {
         console.error("File upload failed:", err);
         alert("Failed to upload file");
@@ -52,12 +54,22 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
       latitude: latitude ? parseFloat(latitude) : null,
       longitude: longitude ? parseFloat(longitude) : null,
       location: location || null,
-      src: streamUrl,
-      detections_enabled: ["weapon"], // default only weapon
+      stream_url: streamUrl,
+      detections_enabled: ["weapon"], // default
     };
 
-    onAdd(newCamera);
-    onClose();
+    try {
+      // Send new camera to backend
+      const res = await api.post("/cameras/", newCamera);
+
+      // ✅ Important: Pass backend response to onAdd
+      onAdd(res.data);
+
+      onClose();
+    } catch (err) {
+      console.error("Error adding camera:", err);
+      alert("Failed to add camera");
+    }
   };
 
   return (
@@ -67,7 +79,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           Add Camera Feed
         </h2>
 
-        {/* Camera info inputs */}
         <input
           type="text"
           placeholder="Camera Name"
@@ -97,7 +108,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-4"
         />
 
-        {/* Mode Toggle */}
         <div className="flex justify-center space-x-4 mb-4">
           <button
             onClick={() => setMode("file")}
@@ -117,7 +127,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           </button>
         </div>
 
-        {/* Input Fields */}
         {mode === "file" ? (
           <>
             <input
@@ -153,9 +162,15 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           </button>
           <button
             onClick={handleAdd}
-            disabled={uploading || !name || ((mode === "file" && !file) || (mode === "url" && !url))}
+            disabled={
+              uploading ||
+              !name ||
+              ((mode === "file" && !file) || (mode === "url" && !url))
+            }
             className={`px-4 py-2 rounded-lg ${
-              uploading || !name || ((mode === "file" && !file) || (mode === "url" && !url))
+              uploading ||
+              !name ||
+              ((mode === "file" && !file) || (mode === "url" && !url))
                 ? "bg-gray-500 cursor-not-allowed"
                 : "bg-primary hover:bg-teal-600"
             }`}
