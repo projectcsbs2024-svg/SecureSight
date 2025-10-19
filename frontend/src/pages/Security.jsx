@@ -18,29 +18,28 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
   const sidebarCurrentWidth = sidebarExpanded ? 160 : 60;
 
+  // Utility to format camera for table
+  const formatCamera = (cam) => {
+    const detections = cam.detections_enabled || [];
+    return {
+      ...cam,
+      gps: cam.location || `${cam.latitude ?? "?"}, ${cam.longitude ?? "?"}`,
+      detection: {
+        weapon: detections.includes("weapon"),
+        scuffle: detections.includes("scuffle"),
+        stampede: detections.includes("stampede"),
+      },
+      detections_enabled: detections,
+      rawCamera: cam,
+    };
+  };
+
   // Fetch all cameras for the user
   useEffect(() => {
     const fetchCameras = async () => {
       try {
         const res = await api.get("/cameras/");
-        const formatted = res.data.map(cam => {
-          const detections = cam.detections_enabled || [];
-          return {
-            id: cam.id,
-            name: cam.name,
-            gps: cam.location || `${cam.latitude ?? "?"}, ${cam.longitude ?? "?"}`,
-            detection: {
-              weapon: detections.includes("weapon"),
-              scuffle: detections.includes("scuffle"),
-              stampede: detections.includes("stampede"),
-            },
-            createdAt: cam.created_at?.split("T")[0],
-            stream_url: cam.stream_url,
-            status: cam.status,
-            detections_enabled: detections,
-            rawCamera: cam, // <-- raw backend object for editing
-          };
-        });
+        const formatted = res.data.map(formatCamera);
         setCameras(formatted);
       } catch (err) {
         console.error("Error fetching cameras:", err);
@@ -53,18 +52,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
   // Add new camera
   const handleAddCamera = (camera) => {
-    const detections = camera.detections_enabled || [];
-    const formatted = {
-      ...camera,
-      detection: {
-        weapon: detections.includes("weapon"),
-        scuffle: detections.includes("scuffle"),
-        stampede: detections.includes("stampede"),
-      },
-      detections_enabled: detections,
-      rawCamera: camera, // save raw object
-    };
-    setCameras(prev => [...prev, formatted]);
+    setCameras(prev => [...prev, formatCamera(camera)]);
     setShowAddModal(false);
   };
 
@@ -90,25 +78,9 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
       const res = await api.put(`/cameras/${updatedCamera.id}`, body);
       const cam = res.data;
-      const updatedDetections = cam.detections_enabled || [];
 
       setCameras(prev =>
-        prev.map(c =>
-          c.id === cam.id
-            ? {
-                ...c,
-                name: cam.name,
-                gps: cam.location || `${cam.latitude}, ${cam.longitude}`,
-                detection: {
-                  weapon: updatedDetections.includes("weapon"),
-                  scuffle: updatedDetections.includes("scuffle"),
-                  stampede: updatedDetections.includes("stampede"),
-                },
-                detections_enabled: updatedDetections,
-                rawCamera: cam, // update raw object
-              }
-            : c
-        )
+        prev.map(c => (c.id === cam.id ? formatCamera(cam) : c))
       );
 
       setEditingCamera(null);
@@ -208,7 +180,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
                     </td>
                     <td className="px-4 py-3 flex gap-2">
                       <button
-                        onClick={() => setEditingCamera(cam.rawCamera || cam)} // pass raw object
+                        onClick={() => setEditingCamera(cam.rawCamera || cam)}
                         className="bg-blue-500 text-white px-2 py-1 rounded flex items-center gap-1"
                       >
                         <Edit2 size={14} /> Edit
