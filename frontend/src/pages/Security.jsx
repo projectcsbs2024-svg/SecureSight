@@ -3,10 +3,9 @@ import React, { useState, useEffect } from "react";
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
-import { Edit2, Trash2 } from "lucide-react"; // ✅ added Trash2
+import { Edit2, Trash2 } from "lucide-react";
 import { AddCameraModal } from "../components/AddCameraModal";
 import { EditCameraModal } from "../components/EditCameraModal";
-import { jsPDF } from "jspdf";
 import api from "../apiHandle/api";
 
 export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
@@ -14,29 +13,33 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editingCamera, setEditingCamera] = useState(null);
-  const [exportFormat, setExportFormat] = useState("csv");
-  const [exportStartDate, setExportStartDate] = useState("");
-  const [exportEndDate, setExportEndDate] = useState("");
   const [cameras, setCameras] = useState([]);
   const [loading, setLoading] = useState(true);
 
   const sidebarCurrentWidth = sidebarExpanded ? 160 : 60;
 
+  // Fetch all cameras for the user
   useEffect(() => {
     const fetchCameras = async () => {
       try {
         const res = await api.get("/cameras/");
-        const formatted = res.data.map(cam => ({
-          id: cam.id,
-          name: cam.name,
-          gps: cam.location || `${cam.latitude ?? "?"}, ${cam.longitude ?? "?"}`,
-          detection: {
-            weapon: cam.detections_enabled?.includes("weapon"),
-            scuffle: cam.detections_enabled?.includes("scuffle"),
-            stampede: cam.detections_enabled?.includes("stampede"),
-          },
-          createdAt: cam.created_at?.split("T")[0],
-        }));
+        const formatted = res.data.map(cam => {
+          const detections = cam.detections_enabled || []; // default to empty array
+          return {
+            id: cam.id,
+            name: cam.name,
+            gps: cam.location || `${cam.latitude ?? "?"}, ${cam.longitude ?? "?"}`,
+            detection: {
+              weapon: detections.includes("weapon"),
+              scuffle: detections.includes("scuffle"),
+              stampede: detections.includes("stampede"),
+            },
+            createdAt: cam.created_at?.split("T")[0],
+            stream_url: cam.stream_url,
+            status: cam.status,
+            detections_enabled: detections, // keep original array for edits
+          };
+        });
         setCameras(formatted);
       } catch (err) {
         console.error("Error fetching cameras:", err);
@@ -47,32 +50,31 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     if (user) fetchCameras();
   }, [user]);
 
+  // Add new camera
   const handleAddCamera = (camera) => {
-    setCameras(prev => [
-      ...prev,
-      {
-        id: camera.id,
-        name: camera.name,
-        gps: camera.location || `${camera.latitude ?? "?"}, ${camera.longitude ?? "?"}`,
-        detection: {
-          weapon: camera.detections_enabled?.includes("weapon"),
-          scuffle: camera.detections_enabled?.includes("scuffle"),
-          stampede: camera.detections_enabled?.includes("stampede"),
-        },
-        createdAt: camera.created_at?.split("T")[0],
+    // Ensure detections_enabled exists
+    const detections = camera.detections_enabled || [];
+    const formatted = {
+      ...camera,
+      detection: {
+        weapon: detections.includes("weapon"),
+        scuffle: detections.includes("scuffle"),
+        stampede: detections.includes("stampede"),
       },
-    ]);
+      detections_enabled: detections,
+    };
+    setCameras(prev => [...prev, formatted]);
     setShowAddModal(false);
   };
 
-  // ✅ Fixed handleSaveCamera
+  // Save edited camera
   const handleSaveCamera = async (updatedCamera) => {
     try {
-      // Transform detections_enabled array into detection object
+      const detections = updatedCamera.detections_enabled || [];
       const detectionObj = {
-        weapon: updatedCamera.detections_enabled?.includes("weapon") || false,
-        scuffle: updatedCamera.detections_enabled?.includes("scuffle") || false,
-        stampede: updatedCamera.detections_enabled?.includes("stampede") || false,
+        weapon: detections.includes("weapon"),
+        scuffle: detections.includes("scuffle"),
+        stampede: detections.includes("stampede"),
       };
 
       const body = {
@@ -85,20 +87,21 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
       const res = await api.put(`/cameras/${updatedCamera.id}`, body);
       const cam = res.data;
+      const updatedDetections = cam.detections_enabled || [];
 
       setCameras(prev =>
         prev.map(c =>
           c.id === cam.id
             ? {
-                id: cam.id,
+                ...c,
                 name: cam.name,
                 gps: cam.location,
                 detection: {
-                  weapon: cam.detections_enabled?.includes("weapon"),
-                  scuffle: cam.detections_enabled?.includes("scuffle"),
-                  stampede: cam.detections_enabled?.includes("stampede"),
+                  weapon: updatedDetections.includes("weapon"),
+                  scuffle: updatedDetections.includes("scuffle"),
+                  stampede: updatedDetections.includes("stampede"),
                 },
-                createdAt: cam.created_at?.split("T")[0],
+                detections_enabled: updatedDetections,
               }
             : c
         )
@@ -111,7 +114,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     }
   };
 
-  // ✅ Delete Camera
+  // Delete camera
   const handleDeleteCamera = async (id) => {
     if (!window.confirm("Are you sure you want to delete this camera?")) return;
     try {
@@ -123,52 +126,20 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     }
   };
 
-  const filteredCameras = cameras.filter((cam) => {
-    if (!exportStartDate && !exportEndDate) return true;
-    const camDate = new Date(cam.createdAt);
-    const start = exportStartDate ? new Date(exportStartDate) : null;
-    const end = exportEndDate ? new Date(exportEndDate) : null;
-    if (start && camDate < start) return false;
-    if (end && camDate > end) return false;
-    return true;
-  });
-
-  const handleDownload = (format) => {
-    if (!filteredCameras.length) return;
-    const data = filteredCameras.map(cam => ({
-      ID: cam.id,
-      Name: cam.name,
-      GPS: cam.gps,
-      Weapon: cam.detection.weapon ? "✔" : "✖",
-      Scuffle: cam.detection.scuffle ? "✔" : "✖",
-      Stampede: cam.detection.stampede ? "✔" : "✖",
-    }));
-
-    if (format === "csv" || format === "excel") {
-      const headers = Object.keys(data[0]).join(",");
-      const rows = data.map(cam => Object.values(cam).join(",")).join("\n");
-      const csvContent = `${headers}\n${rows}`;
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+  // Export all cameras
+  const handleExport = async () => {
+    try {
+      const res = await api.get("/cameras/export/", { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.setAttribute("download", `cameras.${format === "excel" ? "xlsx" : "csv"}`);
+      link.href = url;
+      link.setAttribute("download", "cameras.csv");
       document.body.appendChild(link);
       link.click();
-      document.body.removeChild(link);
-    }
-
-    if (format === "pdf") {
-      const doc = new jsPDF();
-      let y = 10;
-      data.forEach(cam => {
-        doc.text(
-          `ID: ${cam.ID}, Name: ${cam.Name}, GPS: ${cam.GPS}, Weapon: ${cam.Weapon}, Scuffle: ${cam.Scuffle}, Stampede: ${cam.Stampede}`,
-          10,
-          y
-        );
-        y += 10;
-      });
-      doc.save("cameras.pdf");
+      link.remove();
+    } catch (err) {
+      console.error("Export failed:", err);
+      alert("Failed to export cameras");
     }
   };
 
@@ -195,23 +166,20 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         <div className="flex-1 flex flex-col p-6 overflow-auto" style={{ marginTop: `${navbarHeight}px` }}>
           <div className="flex justify-between items-center mb-6">
             <SummaryCard title="Total Cameras" value={cameras.length} color="green" />
-            <button
-              onClick={() => setShowAddModal(true)}
-              className="bg-blue-500 text-white px-4 py-2 rounded flex items-center gap-2"
-            >
-              Add Camera
-            </button>
-          </div>
-
-          <div className="bg-white text-gray-800 shadow-md rounded-xl p-4 mb-6 flex flex-col sm:flex-row items-center gap-2">
-            <input type="date" className="border rounded px-2 py-1" value={exportStartDate} onChange={(e) => setExportStartDate(e.target.value)} />
-            <input type="date" className="border rounded px-2 py-1" value={exportEndDate} onChange={(e) => setExportEndDate(e.target.value)} />
-            <select className="border rounded px-2 py-1" value={exportFormat} onChange={(e) => setExportFormat(e.target.value)}>
-              <option value="csv">CSV</option>
-              <option value="excel">Excel</option>
-              <option value="pdf">PDF</option>
-            </select>
-            <button className="bg-green-500 text-white px-3 py-1 rounded" onClick={() => handleDownload(exportFormat)}>Download</button>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="bg-blue-500 text-white px-4 py-2 rounded flex items-center gap-2"
+              >
+                Add Camera
+              </button>
+              <button
+                onClick={handleExport}
+                className="bg-green-500 text-white px-4 py-2 rounded"
+              >
+                Export Camera Data
+              </button>
+            </div>
           </div>
 
           <div className="bg-white rounded-xl shadow-md overflow-auto max-h-[500px]">

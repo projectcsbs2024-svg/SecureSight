@@ -121,3 +121,41 @@ def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = 
     db.delete(db_camera)
     db.commit()
     return {"message": "Camera deleted successfully"}
+
+import csv
+from fastapi.responses import StreamingResponse
+from io import StringIO
+
+# ----------------------
+# Export all cameras (CSV)
+# ----------------------
+@router.get("/export/")
+def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    cameras = db.query(Camera).filter(Camera.user_id == user.id).all()
+
+    # Prepare CSV in memory
+    output = StringIO()
+    writer = csv.writer(output)
+    # Header
+    writer.writerow(["ID", "Name", "Latitude", "Longitude", "Location", "Stream URL", "Detections Enabled", "Status", "Created At"])
+
+    # Rows
+    for cam in cameras:
+        writer.writerow([
+            cam.id,
+            cam.name,
+            cam.latitude,
+            cam.longitude,
+            cam.location,
+            cam.stream_url,
+            ",".join(cam.detections_enabled or []),
+            cam.status,
+            cam.created_at.strftime("%Y-%m-%d %H:%M:%S") if cam.created_at else ""
+        ])
+
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=cameras.csv"}
+    )
