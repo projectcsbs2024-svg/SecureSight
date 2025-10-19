@@ -153,19 +153,32 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
               </div>
 
               {mode === "file" ? (
-                <>
+                <div className="mb-3">
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => document.getElementById("cameraFileInput").click()}
+                      className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-xs sm:text-sm hover:bg-teal-600 transition-all"
+                    >
+                      Choose File
+                    </button>
+                    <span className="text-gray-300 text-xs sm:text-sm">
+                      {file ? file.name : "No file chosen"}
+                    </span>
+                  </div>
                   <input
+                    id="cameraFileInput"
                     type="file"
                     accept="video/*"
                     onChange={handleFileChange}
-                    className="block w-full text-xs text-gray-300 mb-3"
+                    className="hidden"
                   />
+
                   {file && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3 }}
-                      className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600"
+                      className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600 mt-2"
                     >
                       <video
                         src={URL.createObjectURL(file)}
@@ -174,7 +187,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                       />
                     </motion.div>
                   )}
-                </>
+                </div>
               ) : (
                 <>
                   <input
