@@ -13,6 +13,7 @@ export default function LiveView() {
   const [showModal, setShowModal] = useState(false);
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [alertCollapsed, setAlertCollapsed] = useState(false);
+  const [loading, setLoading] = useState(true);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -21,20 +22,25 @@ export default function LiveView() {
     if (!user) navigate("/");
   }, [user, navigate]);
 
-  // Fetch cameras from backend
+  // Fetch cameras from backend whenever user is available
   useEffect(() => {
+    if (!user) return; // wait until user is available
+
     const fetchCameras = async () => {
+      setLoading(true);
       try {
         const res = await api.get("/cameras/");
         setCameras(res.data);
       } catch (err) {
         console.error("Failed to fetch cameras:", err);
+      } finally {
+        setLoading(false);
       }
     };
     fetchCameras();
-  }, []);
+  }, [user]);
 
-  // Add new camera (state update only — modal handles API)
+  // Add new camera (update state immediately)
   const handleAddCamera = (newCameraFromBackend) => {
     setCameras((prev) => [...prev, newCameraFromBackend]);
   };
@@ -86,7 +92,11 @@ export default function LiveView() {
               gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
             }}
           >
-            {cameras.length === 0 ? (
+            {loading ? (
+              <div className="col-span-full flex justify-center text-gray-400 italic">
+                Loading cameras...
+              </div>
+            ) : cameras.length === 0 ? (
               <div className="col-span-full flex justify-center text-gray-400 italic">
                 No cameras added yet
               </div>
