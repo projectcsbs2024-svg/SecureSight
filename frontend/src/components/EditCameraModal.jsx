@@ -11,12 +11,17 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
 
   useEffect(() => {
     if (camera) {
+      // Convert camera.detection object back to array for checkboxes
+      const detectionsArray = Object.entries(camera.detection || {})
+        .filter(([_, enabled]) => enabled)
+        .map(([key]) => key);
+
       setCameraData({
         name: camera.name || "",
         latitude: camera.latitude || "",
         longitude: camera.longitude || "",
         location: camera.location || "",
-        detections_enabled: camera.detections_enabled || ["weapon"],
+        detections_enabled: detectionsArray.length ? detectionsArray : ["weapon"],
       });
     }
   }, [camera]);
