@@ -23,6 +23,7 @@ serviceAccountKey.json
 app/serviceAccountKey.json
 *.json
 backend/uploads/
+backend/app/static/detections
 
 
 
