@@ -6,26 +6,19 @@ from app.routes.auth import get_current_user
 from datetime import datetime
 import os
 import shutil
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from pydantic import BaseModel
-from app.database import get_db
-from app.models import UserSetting
-from app.routes.auth import get_current_user
-
 
 router = APIRouter(prefix="/detections", tags=["Detections"])
 
 UPLOAD_FOLDER = "uploads"
-
-# Ensure uploads folder exists
 if not os.path.exists(UPLOAD_FOLDER):
     os.makedirs(UPLOAD_FOLDER)
 
+
 @router.post("/{camera_id}/upload")
 def add_detection_with_file(
-    camera_id: str,
+    camera_id: int,
     confidence: float,
+    detection_type: str,
     status: str = "active",
     action_file: UploadFile = File(...),
     user=Depends(get_current_user),
@@ -36,17 +29,9 @@ def add_detection_with_file(
     if not camera:
         raise HTTPException(status_code=404, detail="Camera not found")
 
-    # Generate detection ID
-    last_detection = db.query(Detection).filter(Detection.camera_id == camera_id).order_by(Detection.id.desc()).first()
-    if last_detection:
-        last_num = int(last_detection.id.split("_")[1])
-        detection_id = f"{camera_id}_{last_num + 1}"
-    else:
-        detection_id = f"{camera_id}_1"
-
     # Save uploaded file
     file_ext = os.path.splitext(action_file.filename)[1]
-    filename = f"{detection_id}{file_ext}"
+    filename = f"{camera_id}_{int(datetime.utcnow().timestamp())}{file_ext}"
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(action_file.file, buffer)
@@ -56,20 +41,54 @@ def add_detection_with_file(
 
     # Save detection in DB
     detection = Detection(
-        id=detection_id,
         camera_id=camera_id,
+        user_id=user.id,
+        detection_type=detection_type,
         confidence=confidence,
         status=status,
-        action=action_type,
-        time=datetime.utcnow()
+        image_url=file_path,
+        timestamp=datetime.utcnow(),
     )
     db.add(detection)
     db.commit()
     db.refresh(detection)
 
     return {
-        "detection_id": detection.id,
+        "id": detection.id,
         "camera_id": camera_id,
+        "detection_type": detection.detection_type,
+        "confidence": detection.confidence,
+        "status": detection.status,
         "action_type": action_type,
-        "file_path": file_path
+        "file_path": file_path,
+        "timestamp": detection.timestamp,
     }
+
+
+@router.get("/", summary="Fetch all detections for the logged-in user")
+def get_detections(
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    detections = (
+        db.query(Detection, Camera)
+        .join(Camera, Detection.camera_id == Camera.id)
+        .filter(Camera.user_id == user.id)
+        .order_by(Detection.timestamp.desc())
+        .all()
+    )
+
+    results = []
+    for detection, camera in detections:
+        results.append({
+            "id": detection.id,
+            "camera_name": camera.name,
+            "camera_id": detection.camera_id,
+            "detection_type": detection.detection_type,
+            "confidence": detection.confidence,
+            "status": detection.status,
+            "image_url": detection.image_url,
+            "timestamp": detection.timestamp,
+        })
+
+    return results

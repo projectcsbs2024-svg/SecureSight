@@ -59,6 +59,7 @@ class Detection(Base):
     confidence = Column(Float, nullable=False)
     image_url = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
+    status = Column(String, default="active")
 
     camera = relationship("Camera", back_populates="detections")
     user = relationship("User", back_populates="detections")
