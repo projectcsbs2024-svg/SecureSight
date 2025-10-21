@@ -10,3 +10,5 @@ requests
 aiofiles
 python-jose
 fastapi[all]
+ultralytics 
+opencv-python

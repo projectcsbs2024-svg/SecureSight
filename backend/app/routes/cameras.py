@@ -7,6 +7,13 @@ from typing import Optional, List
 from app.routes.auth import get_current_user
 import shutil
 import os
+import uuid
+import csv
+from fastapi.responses import StreamingResponse
+from io import StringIO
+
+# Import YOLO weapon detection manager singleton
+from app.services.weapon_worker import weapon_manager  
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -42,7 +49,6 @@ async def upload_video(file: UploadFile = File(...)):
     file_path = os.path.join(UPLOAD_DIR, file.filename)
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-    # Return a URL that can be accessed via browser
     return {"filename": file.filename, "url": f"/videos/{file.filename}"}
 
 # ----------------------
@@ -54,7 +60,6 @@ def add_camera(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    import uuid
     new_camera = Camera(
         id=str(uuid.uuid4()),
         name=camera.name,
@@ -69,6 +74,11 @@ def add_camera(
     db.add(new_camera)
     db.commit()
     db.refresh(new_camera)
+
+    # Start YOLO weapon detection if enabled
+    if "weapon" in (new_camera.detections_enabled or []):
+        weapon_manager.start_worker(new_camera.id)  # <-- only camera_id now
+
     return new_camera
 
 # ----------------------
@@ -99,9 +109,16 @@ def update_camera(
             setattr(db_camera, field, value)
 
     db.commit()
-    db.refresh(db_camera)  # <-- fix here
-    return db_camera  # <-- return updated camera
+    db.refresh(db_camera)
 
+    # Start/stop YOLO worker based on detections_enabled
+    if "weapon" in (db_camera.detections_enabled or []):
+        weapon_manager.stop_worker(db_camera.id)  # stop if already running
+        weapon_manager.start_worker(db_camera.id)
+    else:
+        weapon_manager.stop_worker(db_camera.id)
+
+    return db_camera
 
 # ----------------------
 # Delete camera
@@ -112,19 +129,18 @@ def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = 
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
     
+    # Stop YOLO worker if running
+    weapon_manager.stop_worker(db_camera.id)
+
     # Optional: remove uploaded video file if exists
     if db_camera.stream_url and db_camera.stream_url.startswith("/videos/"):
-        file_path = os.path.join("uploads", os.path.basename(db_camera.stream_url))
+        file_path = os.path.join(UPLOAD_DIR, os.path.basename(db_camera.stream_url))
         if os.path.exists(file_path):
             os.remove(file_path)
     
     db.delete(db_camera)
     db.commit()
     return {"message": "Camera deleted successfully"}
-
-import csv
-from fastapi.responses import StreamingResponse
-from io import StringIO
 
 # ----------------------
 # Export all cameras (CSV)
@@ -133,13 +149,10 @@ from io import StringIO
 def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)):
     cameras = db.query(Camera).filter(Camera.user_id == user.id).all()
 
-    # Prepare CSV in memory
     output = StringIO()
     writer = csv.writer(output)
-    # Header
     writer.writerow(["ID", "Name", "Latitude", "Longitude", "Location", "Stream URL", "Detections Enabled", "Status", "Created At"])
 
-    # Rows
     for cam in cameras:
         writer.writerow([
             cam.id,

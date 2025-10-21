@@ -24,13 +24,14 @@ class UserSetting(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    alert_emails = Column(String, nullable=True)  # store as comma-separated string
+    alert_emails = Column(String, nullable=True)  # comma-separated string
     weapon_threshold = Column(Float, default=0.8)
     scuffle_threshold = Column(Float, default=0.7)
     stampede_threshold = Column(Float, default=0.75)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="settings")
+
 
 class Camera(Base):
     __tablename__ = "cameras"
@@ -41,25 +42,35 @@ class Camera(Base):
     longitude = Column(Float, nullable=True)
     location = Column(String, nullable=True)
     stream_url = Column(String, nullable=True)
-    status = Column(String, default="online")  # e.g. 'online', 'offline'
-    detections_enabled = Column(JSON, default=["weapon"])  # NEW
+    status = Column(String, default="online")  # e.g., 'online', 'offline'
+    detections_enabled = Column(JSON, default=["weapon", "scuffle", "stampede"])
     created_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"))
 
     user = relationship("User", back_populates="cameras")
     detections = relationship("Detection", back_populates="camera")
 
+
 class Detection(Base):
+    """
+    Single table to store all detection types:
+    - weapon: stores weapon type in `subtype`
+    - scuffle: stores scuffle type in `subtype`
+    - stampede: stores number of people in `people_count`
+    """
     __tablename__ = "detections"
 
     id = Column(Integer, primary_key=True, index=True)
     camera_id = Column(Integer, ForeignKey("cameras.id"))
     user_id = Column(Integer, ForeignKey("users.id"))
-    detection_type = Column(String, nullable=False)  # e.g. 'weapon', 'violence', 'crowd'
-    confidence = Column(Float, nullable=False)
+
+    type = Column(String, nullable=False)          # 'weapon', 'scuffle', 'stampede'
+    subtype = Column(String, nullable=True)        # weapon type or scuffle type
+    confidence = Column(Float, nullable=True)      # 0-1 for weapon/scuffle; can be null for stampede
+    people_count = Column(Integer, nullable=True)  # only for stampede
     image_url = Column(Text, nullable=True)
     timestamp = Column(DateTime, default=datetime.utcnow)
-    status = Column(String, default="active")
+    status = Column(String, default="active")      # 'active' or 'resolved'
 
     camera = relationship("Camera", back_populates="detections")
     user = relationship("User", back_populates="detections")
