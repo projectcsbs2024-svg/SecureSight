@@ -172,7 +172,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
         <Navbar userEmail={user?.email} />
 
         {/* Top Summary & Filter */}
-        <div className="flex-shrink-0 p-6 mt-13 flex flex-col gap-4 bg-gray-50">
+        <div className="flex-shrink-0 pt-5 p-4 mt-13 flex flex-col gap-4 bg-gray-50">
           <div className="grid text-gray-800 grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
             <SummaryCard
               title="Total Alerts"
@@ -234,53 +234,89 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
           </div>
 
           {/* Bulk Actions */}
-          <div className="flex gap-2">
-            <button
-              onClick={async () => {
-                const ids = filteredAlerts
-                  .filter((a) => a.status === "Active")
-                  .map((a) => a.id);
-                if (!ids.length) return;
-                try {
-                  await api.patch("/detections/bulk_update/", { ids, status: "resolved" });
-                  setAlerts((prev) =>
-                    prev.map((a) =>
-                      ids.includes(a.id) ? { ...a, status: "Resolved" } : a
-                    )
-                  );
-                  if (selectedAlert && ids.includes(selectedAlert.id))
-                    setSelectedAlert({ ...selectedAlert, status: "Resolved" });
-                } catch (err) {
-                  console.error("Error marking alerts as resolved", err);
-                }
-              }}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
-            >
-              Mark All as Resolved
-            </button>
+          <div className="flex items-center gap-2">
+            {/* Left buttons */}
+            <div className="flex gap-2">
+              <button
+                onClick={async () => {
+                  const ids = filteredAlerts
+                    .filter((a) => a.status === "Active")
+                    .map((a) => a.id);
+                  if (!ids.length) return;
+                  try {
+                    await api.patch("/detections/bulk_update/", { ids, status: "resolved" });
+                    setAlerts((prev) =>
+                      prev.map((a) =>
+                        ids.includes(a.id) ? { ...a, status: "Resolved" } : a
+                      )
+                    );
+                    if (selectedAlert && ids.includes(selectedAlert.id))
+                      setSelectedAlert({ ...selectedAlert, status: "Resolved" });
+                  } catch (err) {
+                    console.error("Error marking alerts as resolved", err);
+                  }
+                }}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
+              >
+                Mark All as Resolved
+              </button>
 
+              <button
+                onClick={async () => {
+                  const ids = filteredAlerts.map((a) => a.id);
+                  if (!ids.length) return;
+                  try {
+                    await api.delete("/detections/bulk_delete/", { data: { ids } });
+                    setAlerts((prev) => prev.filter((a) => !ids.includes(a.id)));
+                    if (selectedAlert && ids.includes(selectedAlert.id))
+                      setSelectedAlert(null);
+                  } catch (err) {
+                    console.error("Error deleting alerts", err);
+                  }
+                }}
+                className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-md text-sm font-semibold"
+              >
+                Delete All
+              </button>
+            </div>
+
+            {/* Right button */}
             <button
-              onClick={async () => {
-                const ids = filteredAlerts.map((a) => a.id);
-                if (!ids.length) return;
-                try {
-                  await api.delete("/detections/bulk_delete/", { data: { ids } });
-                  setAlerts((prev) => prev.filter((a) => !ids.includes(a.id)));
-                  if (selectedAlert && ids.includes(selectedAlert.id))
-                    setSelectedAlert(null);
-                } catch (err) {
-                  console.error("Error deleting alerts", err);
-                }
+              onClick={() => {
+                if (!filteredAlerts.length) return;
+
+                const headers = ["Camera", "Type", "Confidence", "Time", "Status"];
+                const rows = filteredAlerts.map(a => [
+                  a.camera,
+                  a.type,
+                  a.confidence,
+                  a.time,
+                  a.status
+                ]);
+
+                let csvContent =
+                  "data:text/csv;charset=utf-8," +
+                  [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+
+                const encodedUri = encodeURI(csvContent);
+
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", `detections_${user?.email || "user"}.csv`);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
               }}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 px-4 py-2 rounded-md text-sm font-semibold"
+              className="ml-auto bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-semibold"
             >
-              Delete All
+              Export Detection Data
             </button>
           </div>
+
         </div>
 
         {/* Alerts Table */}
-        <div className="flex-1 p-6 bg-gray-50">
+        <div className="flex-1 pt-0 px-6 bg-gray-50">
           <div className="bg-white rounded-xl shadow-md overflow-auto max-h-[300px]">
             {loading ? (
               <div className="flex justify-center items-center h-48 text-gray-500">
