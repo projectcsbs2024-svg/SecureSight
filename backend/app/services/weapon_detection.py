@@ -28,14 +28,13 @@ WEAPON_CLASSES = {
 }
 
 
-# ----------------------------------------------------
-# Detection function
-# ----------------------------------------------------
-def detect_weapons_from_frame(frame, camera_id: str):
+def detect_weapons_from_frame(frame, camera_id: str, frame_index: int = None, frame_time: float = None):
     """
     Detect weapons in a frame using YOLOv8 and store detections.
-    Saves annotated detection images in app/static/detections/
-    and logs them into the database.
+    Now accepts:
+      - frame_index: integer frame number (optional)
+      - frame_time: float seconds position of this frame (optional)
+    Returns list of detection dicts including frame_index and frame_time for frontend sync.
     """
     detections_logged = []
     db = SessionLocal()
@@ -68,7 +67,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                 # Draw bounding box + label
-                color = (0, 255, 0)
+                color = (0, 0, 255)
                 label = f"{subtype} {conf:.2f}"
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
                 cv2.putText(
@@ -81,7 +80,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                     2,
                 )
 
-                # Save detection record
+                # Save detection record in DB
                 try:
                     detection = Detection(
                         camera_id=camera.id,
@@ -89,7 +88,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                         type="weapon",
                         subtype=subtype,
                         confidence=conf,
-                        image_url="",  # filled after saving image
+                        image_url="",
                         timestamp=timestamp,
                         status="Active",
                     )
@@ -97,11 +96,18 @@ def detect_weapons_from_frame(frame, camera_id: str):
                     db.commit()
                     db.refresh(detection)
 
+                    # Include coordinates + frame sync fields
                     detections_logged.append({
                         "detection_id": detection.id,
                         "camera_id": camera.id,
                         "subtype": subtype,
                         "confidence": conf,
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "frame_index": frame_index,
+                        "frame_time": frame_time,   # seconds (float) or None
                         "timestamp": timestamp.isoformat()
                     })
 
@@ -110,6 +116,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                 except Exception as e:
                     db.rollback()
                     print(f"[WeaponDetection] ❌ Failed to save detection: {e}")
+
 
         # -----------------------------
         # Save annotated image (if any detection found)

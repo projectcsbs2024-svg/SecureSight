@@ -11,6 +11,8 @@ import uuid
 import csv
 from fastapi.responses import StreamingResponse
 from io import StringIO
+import json
+import asyncio
 
 # Import YOLO weapon detection manager singleton
 from app.services.weapon_worker import weapon_manager  
@@ -172,3 +174,26 @@ def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=cameras.csv"}
     )
+
+# ----------------------
+# NEW: Live Detection Coordinates Endpoint
+# ----------------------
+@router.get("/{camera_id}/detections/")
+async def stream_detections(camera_id: str):
+    """
+    Stream real-time detection results (bounding boxes, class, confidence).
+    Frontend can use EventSource or WebSocket to receive continuous updates.
+    """
+    if not weapon_manager.has_worker(camera_id):
+        raise HTTPException(status_code=404, detail="No active detection for this camera")
+
+    async def event_generator():
+        while True:
+            detections = weapon_manager.get_latest_detections(camera_id)
+            if detections:
+                # detections should be a list of dicts like:
+                # [{'x1':..., 'y1':..., 'x2':..., 'y2':..., 'confidence':..., 'class':...}]
+                yield f"data: {json.dumps(detections)}\n\n"
+            await asyncio.sleep(0.2)  # adjust update rate
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
