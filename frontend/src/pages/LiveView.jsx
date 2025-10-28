@@ -23,22 +23,31 @@ export default function LiveView() {
   }, [user, navigate]);
 
   // Fetch cameras from backend whenever user is available
-  useEffect(() => {
-    if (!user) return; // wait until user is available
+ useEffect(() => {
+  if (!user) return;
 
-    const fetchCameras = async () => {
-      setLoading(true);
-      try {
-        const res = await api.get("/cameras/");
-        setCameras(res.data);
-      } catch (err) {
-        console.error("Failed to fetch cameras:", err);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchCameras();
-  }, [user]);
+  const fetchCameras = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get("/cameras/");
+      // ✅ Ensure array
+      const data = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data?.cameras)
+        ? res.data.cameras
+        : [];
+      setCameras(data);
+    } catch (err) {
+      console.error("Failed to fetch cameras:", err);
+      setCameras([]); // avoid undefined
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  fetchCameras();
+}, [user]);
+
 
   // Add new camera (update state immediately)
   const handleAddCamera = (newCameraFromBackend) => {

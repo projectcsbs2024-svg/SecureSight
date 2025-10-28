@@ -6,6 +6,8 @@ from app.services.weapon_worker import weapon_manager
 from app.database import get_db
 from app.models import Camera
 from sqlalchemy.orm import Session
+from app.routes import auth, cameras, detections, settings
+
 
 app = FastAPI(title="SecureSight Backend")
 
