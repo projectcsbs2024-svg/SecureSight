@@ -11,7 +11,8 @@ frontend/.turbo/
 # ========================
 # Python / Backend (FastAPI)
 # ========================
-backend/__pycache__/
+backend/app/__pycache__/
+backend/app/services/__pycache__/
 backend/venv/
 backend/app/routes/__pycache__/
 backend/.env
