@@ -116,6 +116,7 @@ export default function LiveView() {
                   src={cam.stream_url || ""}
                   name={cam.name}
                   status={cam.status || "online"}
+                  cameraId={cam.id}
                   onDelete={() => handleDeleteCamera(cam.id)}
                 />
               ))
