@@ -1,3 +1,5 @@
+# app/main.py
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -7,7 +9,8 @@ from app.database import get_db
 from app.models import Camera
 from sqlalchemy.orm import Session
 from app.routes import auth, cameras, detections, settings
-
+import asyncio
+from app.services.ws_manager import ws_manager
 
 app = FastAPI(title="SecureSight Backend")
 
@@ -43,6 +46,13 @@ app.include_router(settings.router)
 # ----------------------
 @app.on_event("startup")
 async def startup_event():
+    # Set ws_manager event loop so worker threads can schedule broadcasts
+    try:
+        loop = asyncio.get_event_loop()
+        ws_manager.set_event_loop(loop)
+    except Exception as e:
+        print(f"[Main] Could not set ws_manager loop: {e}")
+
     db: Session = next(get_db())
 
     try:

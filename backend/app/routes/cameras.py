@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+# app/routes/cameras.py
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, WebSocket
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
@@ -13,7 +15,8 @@ from fastapi.responses import StreamingResponse
 from io import StringIO
 
 # Import YOLO weapon detection manager singleton
-from app.services.weapon_worker import weapon_manager  
+from app.services.weapon_worker import weapon_manager
+from app.services.ws_manager import ws_manager
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -172,3 +175,41 @@ def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=cameras.csv"}
     )
+
+# ----------------------
+# WebSocket endpoint for real-time detection boxes
+# Frontend should connect to: ws://<host>/cameras/ws/{camera_id}
+# ----------------------
+@router.websocket("/ws/{camera_id}")
+async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
+    """
+    Accepts websocket connections from the frontend for a specific camera.
+    The ws_manager will broadcast detection messages (as JSON) with keys:
+    {
+      "camera_id": str,
+      "processing_ms": int,
+      "detections": [
+        {
+          "detection_id": int,
+          "camera_id": str,
+          "subtype": str,
+          "confidence": float,
+          "timestamp": iso,
+          "bbox": [x1_norm, y1_norm, x2_norm, y2_norm],
+          "frame_time_ms": float|None
+        }, ...
+      ]
+    }
+    """
+    await ws_manager.connect(camera_id, websocket)
+    try:
+        while True:
+            # Keep connection alive by receiving (no-op)
+            msg = await websocket.receive_text()
+            # Optionally, you could use ping/pong or messages from frontend
+            # but for now do nothing.
+            # If frontend sends "ping" we could respond; skipping for simplicity.
+    except Exception:
+        pass
+    finally:
+        ws_manager.disconnect(camera_id, websocket)

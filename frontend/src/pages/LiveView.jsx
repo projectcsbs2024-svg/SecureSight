@@ -113,6 +113,7 @@ export default function LiveView() {
               cameras.map((cam) => (
                 <CameraFeed
                   key={cam.id}
+                  cameraId={cam.id}
                   src={cam.stream_url || ""}
                   name={cam.name}
                   status={cam.status || "online"}

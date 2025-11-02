@@ -6,6 +6,8 @@ from app.database import SessionLocal
 from app.models import Camera
 from app.services.weapon_detection import detect_weapons_from_frame
 import time
+import asyncio
+from app.services.ws_manager import ws_manager
 
 class CameraStreamWorker:
     def __init__(self, camera: Camera):
@@ -32,7 +34,7 @@ class CameraStreamWorker:
         Runs the camera stream and logs weapon detections.
         Each thread uses its own DB session.
         """
-        db = SessionLocal()  # thread-safe session
+        db = SessionLocal()
         cap = cv2.VideoCapture(self.camera.stream_url)
 
         if not cap.isOpened():
@@ -47,8 +49,35 @@ class CameraStreamWorker:
                 continue
 
             try:
-                # Pass the DB session to the detection function
-                detect_weapons_from_frame(frame, self.camera.id)
+                # capture frame time position in ms (useful when reading a file)
+                try:
+                    frame_time_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                except Exception:
+                    frame_time_ms = None
+
+                start = time.time()
+                detections = detect_weapons_from_frame(frame, self.camera.id, frame_time_ms)
+                processing_ms = int((time.time() - start) * 1000)
+
+                # If any detections, broadcast via websocket manager
+                if detections:
+                    payload = {
+                        "camera_id": self.camera.id,
+                        "processing_ms": processing_ms,
+                        "detections": detections,
+                    }
+                    # schedule broadcast in the main event loop
+                    if ws_manager.loop:
+                        try:
+                            asyncio.run_coroutine_threadsafe(
+                                ws_manager.broadcast(self.camera.id, payload),
+                                ws_manager.loop
+                            )
+                        except Exception as e:
+                            print(f"[WeaponWorker] Failed to schedule WS broadcast: {e}")
+                    else:
+                        print("[WeaponWorker] ws_manager.loop not set; cannot broadcast")
+
             except Exception as e:
                 print(f"[WeaponWorker] Error detecting weapons for camera {self.camera.id}: {e}")
 

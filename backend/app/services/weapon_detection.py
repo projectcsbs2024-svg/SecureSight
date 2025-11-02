@@ -1,3 +1,5 @@
+# app/services/weapon_detection.py
+
 import os
 import cv2
 from datetime import datetime, timezone
@@ -27,16 +29,27 @@ WEAPON_CLASSES = {
     2: "rifle",
 }
 
-
 # ----------------------------------------------------
 # Detection function
 # ----------------------------------------------------
-def detect_weapons_from_frame(frame, camera_id: str):
+def detect_weapons_from_frame(frame, camera_id: str, frame_time_ms: float | None = None):
     """
     Detect weapons in a frame using YOLOv8 and store detections.
     Only detections with confidence >= user's weapon_threshold are saved.
     Saves annotated detection images in app/static/detections/
     and logs them into the database.
+
+    Returns:
+        detections_logged: list of detection dicts with normalized coords and timestamps:
+            {
+                "detection_id": int,
+                "camera_id": camera_id,
+                "subtype": subtype,
+                "confidence": conf,
+                "timestamp": isoformat,
+                "bbox": [x1_norm, y1_norm, x2_norm, y2_norm],
+                "frame_time_ms": frame_time_ms (may be None)
+            }
     """
     detections_logged = []
     db = SessionLocal()
@@ -63,6 +76,8 @@ def detect_weapons_from_frame(frame, camera_id: str):
         annotated_frame = frame.copy()
         any_detection = False
 
+        h, w = frame.shape[:2]
+
         for result in results:
             for box in result.boxes:
                 cls_id = int(box.cls.item())
@@ -81,7 +96,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                 any_detection = True
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-                # Draw bounding box + label
+                # Draw bounding box + label for storage image
                 color = (0, 255, 0)
                 label = f"{subtype} {conf:.2f}"
                 cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
@@ -94,6 +109,12 @@ def detect_weapons_from_frame(frame, camera_id: str):
                     color,
                     2,
                 )
+
+                # normalized bbox coordinates (0..1)
+                nx1 = max(0.0, min(1.0, x1 / w))
+                ny1 = max(0.0, min(1.0, y1 / h))
+                nx2 = max(0.0, min(1.0, x2 / w))
+                ny2 = max(0.0, min(1.0, y2 / h))
 
                 # Save detection record
                 try:
@@ -116,10 +137,12 @@ def detect_weapons_from_frame(frame, camera_id: str):
                         "camera_id": camera.id,
                         "subtype": subtype,
                         "confidence": conf,
-                        "timestamp": timestamp.isoformat()
+                        "timestamp": timestamp.isoformat(),
+                        "bbox": [nx1, ny1, nx2, ny2],
+                        "frame_time_ms": frame_time_ms
                     })
 
-                    # ✅ Only print actual detection logs
+                    # Only print actual detection logs
                     print(f"[WeaponDetection] Detected {subtype} with {conf:.2f} confidence")
 
                 except Exception:
