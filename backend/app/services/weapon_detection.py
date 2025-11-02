@@ -3,7 +3,7 @@ import cv2
 from datetime import datetime, timezone
 from ultralytics import YOLO
 from app.database import SessionLocal
-from app.models import Detection, Camera
+from app.models import Detection, Camera, UserSetting
 
 # ----------------------------------------------------
 # Paths
@@ -34,6 +34,7 @@ WEAPON_CLASSES = {
 def detect_weapons_from_frame(frame, camera_id: str):
     """
     Detect weapons in a frame using YOLOv8 and store detections.
+    Only detections with confidence >= user's weapon_threshold are saved.
     Saves annotated detection images in app/static/detections/
     and logs them into the database.
     """
@@ -43,28 +44,41 @@ def detect_weapons_from_frame(frame, camera_id: str):
     try:
         camera = db.query(Camera).filter(Camera.id == str(camera_id)).first()
         if not camera:
-            print(f"[WeaponDetection] Camera {camera_id} not found in DB.")
             return detections_logged
 
         user_id = camera.user_id
+
+        # ----------------------------------------------------
+        # Get user's threshold (default 0.8 if not set)
+        # ----------------------------------------------------
+        settings = db.query(UserSetting).filter(UserSetting.user_id == user_id).first()
+        weapon_threshold = settings.weapon_threshold if settings else 0.8
+
         timestamp = datetime.now(timezone.utc)
 
         # -----------------------------
         # Run YOLO model prediction
         # -----------------------------
         results = model.predict(frame, verbose=False)
-        annotated_frame = frame.copy()  # draw all boxes here
+        annotated_frame = frame.copy()
         any_detection = False
 
         for result in results:
             for box in result.boxes:
                 cls_id = int(box.cls.item())
                 conf = float(box.conf.item())
+
+                # Skip if not a known weapon
                 if cls_id not in WEAPON_CLASSES:
                     continue
 
-                any_detection = True
                 subtype = WEAPON_CLASSES[cls_id]
+
+                # Skip detections below threshold
+                if conf < weapon_threshold:
+                    continue
+
+                any_detection = True
                 x1, y1, x2, y2 = map(int, box.xyxy[0])
 
                 # Draw bounding box + label
@@ -89,7 +103,7 @@ def detect_weapons_from_frame(frame, camera_id: str):
                         type="weapon",
                         subtype=subtype,
                         confidence=conf,
-                        image_url="",  # filled after saving image
+                        image_url="",
                         timestamp=timestamp,
                         status="Active",
                     )
@@ -105,11 +119,11 @@ def detect_weapons_from_frame(frame, camera_id: str):
                         "timestamp": timestamp.isoformat()
                     })
 
-                    print(f"[WeaponDetection] ✅ Logged detection {detection.id} ({subtype})")
+                    # ✅ Only print actual detection logs
+                    print(f"[WeaponDetection] Detected {subtype} with {conf:.2f} confidence")
 
-                except Exception as e:
+                except Exception:
                     db.rollback()
-                    print(f"[WeaponDetection] ❌ Failed to save detection: {e}")
 
         # -----------------------------
         # Save annotated image (if any detection found)
@@ -128,10 +142,8 @@ def detect_weapons_from_frame(frame, camera_id: str):
                 )
             db.commit()
 
-            print(f"[WeaponDetection] 💾 Saved annotated frame {filename}")
-
     except Exception as e:
-        print(f"[WeaponDetection] ❌ Error running detection: {e}")
+        print(f"[WeaponDetection] Error running detection: {e}")
 
     finally:
         db.close()
