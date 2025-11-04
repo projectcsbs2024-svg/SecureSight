@@ -116,6 +116,7 @@ def update_camera(
 
     # Start/stop YOLO worker based on detections_enabled
     if "weapon" in (db_camera.detections_enabled or []):
+        # restart to pick up any stream_url change
         weapon_manager.stop_worker(db_camera.id)  # stop if already running
         weapon_manager.start_worker(db_camera.id)
     else:
@@ -188,17 +189,7 @@ async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
     {
       "camera_id": str,
       "processing_ms": int,
-      "detections": [
-        {
-          "detection_id": int,
-          "camera_id": str,
-          "subtype": str,
-          "confidence": float,
-          "timestamp": iso,
-          "bbox": [x1_norm, y1_norm, x2_norm, y2_norm],
-          "frame_time_ms": float|None
-        }, ...
-      ]
+      "detections": [...]
     }
     """
     await ws_manager.connect(camera_id, websocket)
@@ -206,10 +197,22 @@ async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
         while True:
             # Keep connection alive by receiving (no-op)
             msg = await websocket.receive_text()
-            # Optionally, you could use ping/pong or messages from frontend
-            # but for now do nothing.
-            # If frontend sends "ping" we could respond; skipping for simplicity.
+            # do nothing with incoming messages for now
     except Exception:
         pass
     finally:
         ws_manager.disconnect(camera_id, websocket)
+
+# ----------------------
+# Position endpoint for file-based cameras
+# Returns the backend's current processing time in ms (0 if unknown)
+# ----------------------
+@router.get("/{camera_id}/position")
+def get_camera_position(camera_id: str):
+    """
+    Returns: {"current_time_ms": <int>}
+    If the camera is a video file and backend is processing it, the value
+    will be the last position captured by the worker (cv2.CAP_PROP_POS_MSEC).
+    """
+    pos = weapon_manager.current_positions.get(camera_id, 0)
+    return {"current_time_ms": int(pos or 0)}

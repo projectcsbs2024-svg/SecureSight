@@ -1,4 +1,4 @@
-// CameraFeed.jsx
+// src/components/CameraFeed.jsx
 import { useEffect, useRef, useState } from "react";
 
 export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
@@ -9,27 +9,38 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
   const reconAttemptRef = useRef(0);
   const lastTimeRef = useRef(0);
   const playingRef = useRef(false);
-  const [overlays, setOverlays] = useState([]);
+
+  const [annotations, setAnnotations] = useState([]); // store all detections
   const processingSamples = useRef([]);
   const [bufferDelay, setBufferDelay] = useState(0.5);
   const [connected, setConnected] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // ---- Build WebSocket URL ----
-  const buildWsUrl = () => {
-    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const rawApi = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
-    const apiBase = rawApi.replace(/^http(s?)/, wsProtocol);
-    return `${apiBase.replace(/\/$/, "")}/cameras/ws/${cameraId}`;
+  const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
+  const isVideoFileSrc = (s) => {
+    if (!s) return false;
+    const lower = s.toLowerCase();
+    if (lower.includes("/videos/") || lower.includes("/uploads/")) return true;
+    return (
+      lower.endsWith(".mp4") ||
+      lower.endsWith(".mkv") ||
+      lower.endsWith(".avi") ||
+      lower.endsWith(".mov") ||
+      lower.endsWith(".webm")
+    );
   };
 
-  // ---- WebSocket connection with auto-reconnect ----
+  // ---- WebSocket connection ----
   useEffect(() => {
     let closedByUs = false;
     let reconnectTimer = null;
 
     const connect = () => {
-      const wsUrl = buildWsUrl();
+      const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const apiBase = API_BASE.replace(/^http(s?)/, wsProtocol);
+      const wsUrl = `${apiBase.replace(/\/$/, "")}/cameras/ws/${cameraId}`;
+
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -38,7 +49,9 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
           console.log(`✅ WS open for camera ${cameraId}`);
           setConnected(true);
           reconAttemptRef.current = 0;
-          try { ws.send(JSON.stringify({ type: "hello", camera_id: cameraId })); } catch {}
+          try {
+            ws.send(JSON.stringify({ type: "hello", camera_id: cameraId }));
+          } catch {}
         };
 
         ws.onmessage = (ev) => {
@@ -47,30 +60,28 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
 
             if (msg.processing_ms != null) {
               processingSamples.current.push(msg.processing_ms);
-              if (processingSamples.current.length > 12) processingSamples.current.shift();
-              const avg = processingSamples.current.reduce((a, b) => a + b, 0) / processingSamples.current.length;
-              const newBuffer = Math.max(0.2, avg / 1000 + 0.25);
-              setBufferDelay(newBuffer);
+              if (processingSamples.current.length > 12)
+                processingSamples.current.shift();
+              const avg =
+                processingSamples.current.reduce((a, b) => a + b, 0) /
+                processingSamples.current.length;
+              setBufferDelay(Math.max(0.2, avg / 1000 + 0.25));
             }
 
+            // ✅ Add all detections received
             if (Array.isArray(msg.detections) && msg.detections.length > 0) {
-              const now = performance.now();
-              msg.detections.forEach((det) => {
-                const frameTime = det.frame_time_ms ? det.frame_time_ms / 1000 : null;
-                const current = videoRef.current ? videoRef.current.currentTime : 0;
-                const displayAt = frameTime ? frameTime + bufferDelay : current + 0.15;
-
-                const ov = {
-                  id: `${det.detection_id}_${now}_${Math.random().toString(36).slice(2, 7)}`,
+              const timestamp = Date.now();
+              setAnnotations((prev) => [
+                ...prev,
+                ...msg.detections.map((det) => ({
+                  id: det.detection_id ?? `${timestamp}_${Math.random()}`,
                   bbox: det.bbox || [0, 0, 0, 0],
-                  displayAt,
-                  removeAfter: 2.5, // longer visibility window
                   subtype: det.subtype,
                   confidence: det.confidence,
-                };
-
-                setOverlays((prev) => [...prev, ov]);
-              });
+                  frameTime: det.frame_time_ms ? det.frame_time_ms / 1000 : null,
+                  receivedAt: timestamp,
+                })),
+              ]);
             }
           } catch (e) {
             console.error("WS message parse error:", e);
@@ -105,13 +116,61 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
       closedByUs = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (wsRef.current) {
-        try { wsRef.current.close(); } catch {}
+        try {
+          wsRef.current.close();
+        } catch {}
         wsRef.current = null;
       }
     };
   }, [cameraId]);
 
-  // ---- Playback control: live-like ----
+  // ---- Periodic backend position sync for file videos ----
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || !src) return;
+    if (!isVideoFileSrc(src)) return;
+
+    let aborted = false;
+    let lastTarget = 0;
+
+    const syncToBackend = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/cameras/${cameraId}/position`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (aborted) return;
+
+        const backend_ms = data?.current_time_ms || 0;
+        const backend_s = backend_ms / 1000;
+        if (backend_s < 0.5) return;
+
+        const drift = backend_s - (v.currentTime || 0);
+        if (drift > 5) {
+          const target = Math.max(0, backend_s - 1.5);
+          if (Math.abs(target - lastTarget) > 1.0) {
+            console.log(`[Sync] Moving video to ${target.toFixed(1)}s`);
+            v.currentTime = target;
+            lastTarget = target;
+          }
+        }
+
+        if (v.duration && backend_s > v.duration - 2) {
+          v.pause();
+        }
+      } catch (e) {
+        console.warn("Could not sync video position:", e);
+      }
+    };
+
+    syncToBackend();
+    const interval = setInterval(syncToBackend, 4000);
+    return () => {
+      aborted = true;
+      clearInterval(interval);
+    };
+  }, [cameraId, src]);
+
+  // ---- Playback control ----
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
@@ -119,144 +178,128 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     const tryStart = () => {
       if (!playingRef.current) {
         playingRef.current = true;
-        const startDelayMs = Math.round((bufferDelay + 0.2) * 1000);
         setTimeout(() => {
           v.play().catch(() => {
             console.warn("Autoplay blocked; user must interact.");
           });
-        }, startDelayMs);
+        }, Math.round((bufferDelay + 0.2) * 1000));
       }
     };
 
     if (connected && src) tryStart();
-
-    const onTimeUpdate = () => (lastTimeRef.current = v.currentTime);
-    const onPause = () => v.play().catch(() => {});
-    const onSeeking = () => {
-      try {
-        v.currentTime = Math.max(0, lastTimeRef.current || 0);
-      } catch {}
-    };
-
-    v.addEventListener("timeupdate", onTimeUpdate);
-    v.addEventListener("pause", onPause);
-    v.addEventListener("seeking", onSeeking);
     v.muted = true;
     v.playsInline = true;
     v.disablePictureInPicture = true;
 
+    const onTimeUpdate = () => (lastTimeRef.current = v.currentTime);
+    const onPause = () => v.play().catch(() => {});
+    v.addEventListener("timeupdate", onTimeUpdate);
+    v.addEventListener("pause", onPause);
+
     return () => {
       v.removeEventListener("timeupdate", onTimeUpdate);
       v.removeEventListener("pause", onPause);
-      v.removeEventListener("seeking", onSeeking);
     };
   }, [connected, bufferDelay, src]);
 
-  // ---- Overlay timing cleanup ----
+  // ---- Cleanup annotations periodically ----
   useEffect(() => {
-    const tick = () => {
-      const v = videoRef.current;
-      if (!v) return;
-      const current = v.currentTime || 0;
-      setOverlays((prev) =>
-        prev.filter(
-          (o) =>
-            current + 0.1 >= o.displayAt &&
-            current <= o.displayAt + o.removeAfter + 0.5
-        )
-      );
+    const cleanup = () => {
+      const now = Date.now();
+      // keep last 30s of detections
+      setAnnotations((prev) => prev.filter((a) => now - a.receivedAt < 30000));
     };
-    const id = setInterval(tick, 100);
+    const id = setInterval(cleanup, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // ---- Double-click fullscreen toggle ----
-  const toggleFullscreen = async () => {
-    try {
-      if (!document.fullscreenElement) {
-        await containerRef.current?.requestFullscreen?.();
-        setIsFullscreen(true);
-      } else {
-        await document.exitFullscreen();
-        setIsFullscreen(false);
-      }
-    } catch (e) {
-      console.warn("Fullscreen toggle failed:", e);
-    }
-  };
-
-  // ---- Overlay drawing ----
+  // ---- Draw overlays for all relevant detections ----
   const renderOverlays = () => {
     const v = videoRef.current;
     if (!v) return null;
-
     const rect = v.getBoundingClientRect();
     const width = rect.width;
     const height = rect.height;
+    const current = v.currentTime || 0;
 
-    return overlays.map((ov) => {
-      const current = v.currentTime || 0;
-      if (current + 0.05 < ov.displayAt) return null;
-      if (current > ov.displayAt + ov.removeAfter + 0.5) return null;
+    return annotations
+      .filter((a) => {
+        if (a.frameTime != null) {
+          // show boxes within ±1s window for file videos
+          return Math.abs(current - a.frameTime) < 0.2;
+        } else {
+          // live streams: show for a few seconds after receipt
+          return Date.now() - a.receivedAt < 3000;
+        }
+      })
+      .map((a) => {
+        const [nx1, ny1, nx2, ny2] = a.bbox || [0, 0, 0, 0];
+        const x = nx1 * width;
+        const y = ny1 * height;
+        const w = Math.max(2, (nx2 - nx1) * width);
+        const h = Math.max(2, (ny2 - ny1) * height);
+        const borderColor =
+          a.subtype === "knife"
+            ? "rgba(255,0,0,0.9)"
+            : "rgba(0,255,0,0.9)";
+        const label = `${a.subtype ?? "weapon"} ${
+          a.confidence ? a.confidence.toFixed(2) : ""
+        }`;
 
-      const [nx1, ny1, nx2, ny2] = ov.bbox || [0, 0, 0, 0];
-      const x = nx1 * width;
-      const y = ny1 * height;
-      const w = Math.max(2, (nx2 - nx1) * width);
-      const h = Math.max(2, (ny2 - ny1) * height);
-
-      const label = `${ov.subtype ?? "weapon"} ${ov.confidence ? ov.confidence.toFixed(2) : ""}`;
-      const borderColor = ov.subtype === "knife"
-        ? "rgba(255,0,0,0.9)"
-        : "rgba(0,255,0,0.9)";
-
-      return (
-        <div
-          key={ov.id}
-          style={{
-            position: "absolute",
-            left: `${x}px`,
-            top: `${y}px`,
-            width: `${w}px`,
-            height: `${h}px`,
-            border: `2px solid ${borderColor}`,
-            borderRadius: "6px",
-            background: "rgba(0,255,0,0.05)",
-            boxShadow: "0 0 10px rgba(0,255,0,0.3)",
-            pointerEvents: "none",
-            zIndex: 40,
-            transition: "all 0.1s linear",
-          }}
-        >
+        return (
           <div
+            key={a.id}
             style={{
               position: "absolute",
-              top: -22,
-              left: 0,
-              background: "rgba(0,0,0,0.7)",
-              color: "#fff",
-              fontSize: 12,
-              padding: "2px 6px",
-              borderRadius: 4,
+              left: `${x}px`,
+              top: `${y}px`,
+              width: `${w}px`,
+              height: `${h}px`,
+              border: `2px solid ${borderColor}`,
+              borderRadius: "6px",
+              background: "rgba(0,255,0,0.05)",
+              boxShadow: "0 0 10px rgba(0,255,0,0.3)",
               pointerEvents: "none",
-              whiteSpace: "nowrap",
+              zIndex: 40,
             }}
           >
-            {label}
+            <div
+              style={{
+                position: "absolute",
+                top: -22,
+                left: 0,
+                background: "rgba(0,0,0,0.7)",
+                color: "#fff",
+                fontSize: 12,
+                padding: "2px 6px",
+                borderRadius: 4,
+                pointerEvents: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {label}
+            </div>
           </div>
-        </div>
-      );
-    });
+        );
+      });
   };
 
   return (
     <div
       ref={containerRef}
-      onDoubleClick={toggleFullscreen}
-      className="relative rounded-xl shadow-lg transition-all overflow-hidden group w-full"
+      onDoubleClick={() => {
+        if (!document.fullscreenElement) {
+          containerRef.current?.requestFullscreen?.();
+          setIsFullscreen(true);
+        } else {
+          document.exitFullscreen();
+          setIsFullscreen(false);
+        }
+      }}
+      className="relative rounded-xl shadow-lg overflow-hidden group w-full"
     >
       {src ? (
-        <div className="relative w-full aspect-video" style={{ position: "relative" }}>
+        <div className="relative w-full aspect-video">
           <video
             ref={videoRef}
             src={src}
