@@ -317,7 +317,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
 
         {/* Alerts Table */}
         <div className="flex-1 pt-0 px-6 bg-gray-50">
-          <div className="bg-white rounded-xl shadow-md overflow-auto max-h-[300px]">
+          <div className="bg-white rounded-xl shadow-md overflow-auto max-h-[430px]">
             {loading ? (
               <div className="flex justify-center items-center h-48 text-gray-500">
                 <Loader2 className="animate-spin mr-2" size={20} />
