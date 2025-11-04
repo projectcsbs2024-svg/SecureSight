@@ -225,8 +225,8 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     return annotations
       .filter((a) => {
         if (a.frameTime != null) {
-          // show boxes within ±1s window for file videos
-          return Math.abs(current - a.frameTime) < 0.2;
+          // show boxes within ±0.01s window for file videos
+          return Math.abs(current - a.frameTime) < 0.1;
         } else {
           // live streams: show for a few seconds after receipt
           return Date.now() - a.receivedAt < 3000;
