@@ -14,6 +14,7 @@ export default function LiveView() {
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [alertCollapsed, setAlertCollapsed] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState({ total_today: 0, current_alerts: 0 });
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -47,6 +48,29 @@ export default function LiveView() {
     fetchCameras();
   }, [user]);
 
+  // 📊 Fetch detection stats & current alert count
+  useEffect(() => {
+    if (!user) return; // 👈 wait for Firebase user
+    const fetchStats = async () => {
+      try {
+        const [todayRes, currentRes] = await Promise.all([
+          api.get("/detections/stats"),
+          api.get("/cameras/active_count"),
+        ]);
+        setStats({
+          total_today: todayRes.data.total_today,
+          current_alerts: currentRes.data.current_alerts,
+        });
+      } catch (err) {
+        console.error("Error fetching alert stats:", err);
+      }
+    };
+
+    fetchStats();
+    const interval = setInterval(fetchStats, 5000); // Refresh every 5 seconds
+    return () => clearInterval(interval);
+  }, []);
+
   // ➕ Add new camera
   const handleAddCamera = (newCameraFromBackend) => {
     setCameras((prev) => [...prev, newCameraFromBackend]);
@@ -79,11 +103,7 @@ export default function LiveView() {
     });
   };
 
-  // Stats placeholders (if used elsewhere)
-  const totalAlerts = 12;
   const activeCameras = cameras.length;
-  const currentAlerts = 3;
-
   const sidebarWidth = sidebarExpanded ? 160 : 60;
   const alertWidth = alertCollapsed ? 64 : 288;
   const navbarHeight = 64;
@@ -143,9 +163,9 @@ export default function LiveView() {
 
       {/* Alert Panel */}
       <AlertCard
-        totalAlerts={totalAlerts}
+        totalAlerts={stats.total_today}
         activeCameras={activeCameras}
-        currentAlerts={currentAlerts}
+        currentAlerts={stats.current_alerts}
         onAddCameraClick={() => setShowModal(true)}
         collapsed={alertCollapsed}
         toggleCollapse={() => setAlertCollapsed(!alertCollapsed)}

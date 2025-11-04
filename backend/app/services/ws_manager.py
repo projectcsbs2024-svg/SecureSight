@@ -1,14 +1,17 @@
 # app/services/ws_manager.py
+
 import asyncio
 import json
 from typing import Dict, Set
 from starlette.websockets import WebSocket
+from app.services.dashboard_ws import dashboard_ws_manager  # ✅ import for dashboard updates
 
 class WebSocketManager:
     def __init__(self):
         # camera_id -> set of WebSocket connections
         self.connections: Dict[str, Set[WebSocket]] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
+        self.active_alerts: Dict[str, int] = {}  # 👈 track number of boxes per camera
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
@@ -36,7 +39,21 @@ class WebSocketManager:
     async def broadcast(self, camera_id: str, message: dict):
         """
         Broadcast message (dict) to all websockets connected to camera_id.
+        Also updates dashboard with total active bounding boxes.
         """
+        detections = message.get("detections", [])
+        self.active_alerts[camera_id] = len(detections)
+
+        # 🔁 Notify dashboard clients with current total alerts
+        total_boxes = sum(self.active_alerts.values())
+        try:
+            await dashboard_ws_manager.broadcast({
+                "type": "current_alerts_update",
+                "current_alerts": total_boxes
+            })
+        except Exception as e:
+            print(f"[WSManager] Dashboard broadcast error: {e}")
+
         conns = list(self.connections.get(camera_id, []))
         if not conns:
             return
@@ -46,7 +63,6 @@ class WebSocketManager:
             try:
                 await ws.send_text(payload)
             except Exception:
-                # mark for removal
                 to_remove.append(ws)
         for ws in to_remove:
             self.disconnect(camera_id, ws)

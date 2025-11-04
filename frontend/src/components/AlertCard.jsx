@@ -35,7 +35,7 @@ export const AlertCard = ({
           {/* Total Alerts */}
           <div className="bg-gray-900 w-full h-24 flex flex-col justify-center items-center rounded-xl shadow-lg border-2 border-gray-600 transition-all">
             <span className="text-red-400 text-3xl font-bold">{totalAlerts}</span>
-            <span className="px-3 mt-1 text-white text-sm font-semibold">
+            <span className="px-3 mt-1 text-white text-sm font-semibold text-center">
               Total Alerts Today
             </span>
           </div>
@@ -43,7 +43,7 @@ export const AlertCard = ({
           {/* Active Cameras */}
           <div className="bg-gray-900 w-full h-24 flex flex-col justify-center items-center rounded-xl shadow-lg border-2 border-gray-600 transition-all">
             <span className="text-green-400 text-3xl font-bold">{activeCameras}</span>
-            <span className="px-3 mt-1 text-white text-sm font-semibold">
+            <span className="px-3 mt-1 text-white text-sm font-semibold text-center">
               Active Cameras
             </span>
           </div>
@@ -51,7 +51,7 @@ export const AlertCard = ({
           {/* Current Alerts */}
           <div className="bg-gray-900 w-full h-24 flex flex-col justify-center items-center rounded-xl shadow-lg border-2 border-gray-600 transition-all">
             <span className="text-yellow-400 text-3xl font-bold">{currentAlerts}</span>
-            <span className="px-3 mt-1 text-white text-sm font-semibold">
+            <span className="px-3 mt-1 text-white text-sm font-semibold text-center">
               Current Alerts
             </span>
           </div>

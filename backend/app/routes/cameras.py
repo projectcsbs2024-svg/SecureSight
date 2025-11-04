@@ -216,3 +216,11 @@ def get_camera_position(camera_id: str):
     """
     pos = weapon_manager.current_positions.get(camera_id, 0)
     return {"current_time_ms": int(pos or 0)}
+
+@router.get("/active_count")
+def get_current_alert_count():
+    """
+    Returns total active detection boxes across all cameras (real-time).
+    """
+    total_boxes = sum(ws_manager.active_alerts.values())
+    return {"current_alerts": total_boxes}
