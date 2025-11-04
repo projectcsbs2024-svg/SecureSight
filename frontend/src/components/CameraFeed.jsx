@@ -154,8 +154,11 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
           }
         }
 
-        if (v.duration && backend_s > v.duration - 2) {
+        // ✅ Stop playback if backend reached end of file
+        if (v.duration && backend_s >= v.duration - 1) {
+          console.log(`[Sync] Video end reached for camera ${cameraId}`);
           v.pause();
+          playingRef.current = false;
         }
       } catch (e) {
         console.warn("Could not sync video position:", e);
@@ -191,8 +194,24 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     v.playsInline = true;
     v.disablePictureInPicture = true;
 
-    const onTimeUpdate = () => (lastTimeRef.current = v.currentTime);
-    const onPause = () => v.play().catch(() => {});
+    // ✅ Handle playback and stop at EOF
+    const onTimeUpdate = () => {
+      lastTimeRef.current = v.currentTime;
+
+      if (isVideoFileSrc(src) && v.duration && v.currentTime >= v.duration - 0.5) {
+        console.log(`[Playback] Reached end of file for camera ${cameraId}`);
+        v.pause();
+        playingRef.current = false;
+      }
+    };
+
+    const onPause = () => {
+      // Resume only for live streams
+      if (!isVideoFileSrc(src)) {
+        v.play().catch(() => {});
+      }
+    };
+
     v.addEventListener("timeupdate", onTimeUpdate);
     v.addEventListener("pause", onPause);
 
@@ -206,14 +225,13 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
   useEffect(() => {
     const cleanup = () => {
       const now = Date.now();
-      // keep last 30s of detections
       setAnnotations((prev) => prev.filter((a) => now - a.receivedAt < 30000));
     };
     const id = setInterval(cleanup, 5000);
     return () => clearInterval(id);
   }, []);
 
-  // ---- Draw overlays for all relevant detections ----
+  // ---- Draw overlays ----
   const renderOverlays = () => {
     const v = videoRef.current;
     if (!v) return null;
@@ -225,11 +243,9 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     return annotations
       .filter((a) => {
         if (a.frameTime != null) {
-          // show boxes within ±0.01s window for file videos
-          return Math.abs(current - a.frameTime) < 0.1;
+          return Math.abs(current - a.frameTime) < 0.1; // ±0.1s window
         } else {
-          // live streams: show for a few seconds after receipt
-          return Date.now() - a.receivedAt < 3000;
+          return Date.now() - a.receivedAt < 3000; // live overlay duration
         }
       })
       .map((a) => {
@@ -305,6 +321,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
             src={src}
             muted
             playsInline
+            loop={false} // ensure no automatic looping
             className="rounded-xl w-full h-full object-cover select-none"
             style={{ display: "block" }}
           />
@@ -350,7 +367,6 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
       ) : (
         <div className="aspect-video bg-gray-700 flex items-center justify-center rounded-lg relative w-full">
           <span className="text-gray-400">No camera feed</span>
-
           <div
             className={`absolute top-2 left-2 w-3 h-3 rounded-full ${statusColor}`}
             title={status === "online" ? "Online" : "Offline"}
