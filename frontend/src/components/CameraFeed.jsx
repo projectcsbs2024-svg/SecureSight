@@ -2,7 +2,6 @@
 import { useEffect, useRef, useState } from "react";
 
 export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
-  const statusColor = status === "online" ? "bg-green-500" : "bg-red-500";
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const wsRef = useRef(null);
@@ -10,11 +9,12 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
   const lastTimeRef = useRef(0);
   const playingRef = useRef(false);
 
-  const [annotations, setAnnotations] = useState([]); // store all detections
-  const processingSamples = useRef([]);
-  const [bufferDelay, setBufferDelay] = useState(0.5);
+  const [annotations, setAnnotations] = useState([]);
+  const [isStreamFinished, setIsStreamFinished] = useState(false);
   const [connected, setConnected] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [bufferDelay, setBufferDelay] = useState(0.5);
+  const processingSamples = useRef([]);
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
 
@@ -68,7 +68,6 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
               setBufferDelay(Math.max(0.2, avg / 1000 + 0.25));
             }
 
-            // ✅ Add all detections received
             if (Array.isArray(msg.detections) && msg.detections.length > 0) {
               const timestamp = Date.now();
               setAnnotations((prev) => [
@@ -154,11 +153,12 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
           }
         }
 
-        // ✅ Stop playback if backend reached end of file
         if (v.duration && backend_s >= v.duration - 1) {
           console.log(`[Sync] Video end reached for camera ${cameraId}`);
           v.pause();
           playingRef.current = false;
+          setIsStreamFinished(true);
+          setConnected(false);
         }
       } catch (e) {
         console.warn("Could not sync video position:", e);
@@ -194,7 +194,6 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     v.playsInline = true;
     v.disablePictureInPicture = true;
 
-    // ✅ Handle playback and stop at EOF
     const onTimeUpdate = () => {
       lastTimeRef.current = v.currentTime;
 
@@ -202,11 +201,12 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
         console.log(`[Playback] Reached end of file for camera ${cameraId}`);
         v.pause();
         playingRef.current = false;
+        setIsStreamFinished(true);
+        setConnected(false); // 🔴 Mark as disconnected/offline when video ends
       }
     };
 
     const onPause = () => {
-      // Resume only for live streams
       if (!isVideoFileSrc(src)) {
         v.play().catch(() => {});
       }
@@ -231,6 +231,11 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     return () => clearInterval(id);
   }, []);
 
+  const statusColor =
+    connected && !isStreamFinished && status === "online"
+      ? "bg-green-500"
+      : "bg-red-500";
+
   // ---- Draw overlays ----
   const renderOverlays = () => {
     const v = videoRef.current;
@@ -243,9 +248,9 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
     return annotations
       .filter((a) => {
         if (a.frameTime != null) {
-          return Math.abs(current - a.frameTime) < 0.1; // ±0.1s window
+          return Math.abs(current - a.frameTime) < 0.1;
         } else {
-          return Date.now() - a.receivedAt < 3000; // live overlay duration
+          return Date.now() - a.receivedAt < 3000;
         }
       })
       .map((a) => {
@@ -321,7 +326,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
             src={src}
             muted
             playsInline
-            loop={false} // ensure no automatic looping
+            loop={false}
             className="rounded-xl w-full h-full object-cover select-none"
             style={{ display: "block" }}
           />
@@ -340,10 +345,28 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
             {renderOverlays()}
           </div>
 
+          {/* Fade-out overlay when stream ends */}
+          {isStreamFinished && (
+            <div
+              className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white text-xl font-semibold animate-fade-in z-40"
+              style={{ transition: "opacity 0.6s ease-in" }}
+            >
+              <span>Stream Finished</span>
+
+              {/* Keep Close Button over overlay */}
+              <button
+                onClick={onDelete}
+                className="mt-4 px-3 py-1 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium text-sm shadow-md transition"
+              >
+                ✕ Close Camera
+              </button>
+            </div>
+          )}
+
           {/* Status indicator */}
           <div
             className={`absolute top-2 left-2 w-3 h-3 rounded-full ${statusColor}`}
-            title={status === "online" ? "Online" : "Offline"}
+            title={connected ? "Online" : "Offline"}
           />
 
           {/* Camera name */}
@@ -354,22 +377,24 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
             {name}
           </span>
 
-          {/* Delete Button */}
-          <button
-            onClick={onDelete}
-            className="absolute top-2 right-2 text-red-900/400 hover:text-red-500 text-lg z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-            title="Remove camera"
-            style={{ pointerEvents: "auto", marginRight: 8 }}
-          >
-            ✕
-          </button>
+          {/* Delete Button (visible while playing) */}
+          {!isStreamFinished && (
+            <button
+              onClick={onDelete}
+              className="absolute top-2 right-2 text-red-900/400 hover:text-red-500 text-lg z-20 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
+              title="Remove camera"
+              style={{ pointerEvents: "auto", marginRight: 8 }}
+            >
+              ✕
+            </button>
+          )}
         </div>
       ) : (
         <div className="aspect-video bg-gray-700 flex items-center justify-center rounded-lg relative w-full">
           <span className="text-gray-400">No camera feed</span>
           <div
             className={`absolute top-2 left-2 w-3 h-3 rounded-full ${statusColor}`}
-            title={status === "online" ? "Online" : "Offline"}
+            title={connected ? "Online" : "Offline"}
           />
           <span className="absolute top-2 right-2 px-2 py-1 rounded bg-transparent bg-opacity-30 text-white text-sm ">
             {name}
