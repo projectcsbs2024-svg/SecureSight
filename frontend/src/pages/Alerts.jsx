@@ -393,11 +393,29 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
       </div>
 
       {/* Detection Preview Modal */}
-      <DetectionPreview
-        alert={selectedAlert}
-        onClose={() => setSelectedAlert(null)}
-        updateAlertStatus={updateAlertStatus}
-      />
+            {/* Detection Preview Modal */}
+      {selectedAlert && (
+        <DetectionPreview
+          alert={filteredAlerts.find((a) => a.id === selectedAlert.id)}
+          onClose={() => setSelectedAlert(null)}
+          updateAlertStatus={updateAlertStatus}
+          onPrev={() => {
+            const currentIndex = filteredAlerts.findIndex(
+              (a) => a.id === selectedAlert.id
+            );
+            if (currentIndex > 0)
+              setSelectedAlert(filteredAlerts[currentIndex - 1]);
+          }}
+          onNext={() => {
+            const currentIndex = filteredAlerts.findIndex(
+              (a) => a.id === selectedAlert.id
+            );
+            if (currentIndex < filteredAlerts.length - 1)
+              setSelectedAlert(filteredAlerts[currentIndex + 1]);
+          }}
+        />
+      )}
+
     </div>
   );
 }
