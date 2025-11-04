@@ -25,6 +25,7 @@ app/serviceAccountKey.json
 *.json
 backend/uploads/
 backend/app/static/detections
+backend/securesight.db
 
 
 

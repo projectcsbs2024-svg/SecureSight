@@ -1,7 +1,7 @@
 // src/components/CameraFeed.jsx
 import { useEffect, useRef, useState } from "react";
 
-export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
+export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetection }) => {
   const containerRef = useRef(null);
   const videoRef = useRef(null);
   const wsRef = useRef(null);
@@ -70,6 +70,12 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete }) => {
 
             if (Array.isArray(msg.detections) && msg.detections.length > 0) {
               const timestamp = Date.now();
+
+              // 🔔 Notify parent (global alert tone)
+              if (onNewDetection) {
+                onNewDetection(cameraId, msg.detections);
+              }
+
               setAnnotations((prev) => [
                 ...prev,
                 ...msg.detections.map((det) => ({

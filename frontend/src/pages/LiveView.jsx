@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { CameraFeed } from "../components/CameraFeed";
 import { AddCameraModal } from "../components/AddCameraModal";
@@ -17,44 +17,42 @@ export default function LiveView() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect if not logged in
+  // 🧭 Redirect if not logged in
   useEffect(() => {
     if (!user) navigate("/");
   }, [user, navigate]);
 
-  // Fetch cameras from backend whenever user is available
- useEffect(() => {
-  if (!user) return;
+  // 🎥 Fetch cameras when user is available
+  useEffect(() => {
+    if (!user) return;
 
-  const fetchCameras = async () => {
-    setLoading(true);
-    try {
-      const res = await api.get("/cameras/");
-      // ✅ Ensure array
-      const data = Array.isArray(res.data)
-        ? res.data
-        : Array.isArray(res.data?.cameras)
-        ? res.data.cameras
-        : [];
-      setCameras(data);
-    } catch (err) {
-      console.error("Failed to fetch cameras:", err);
-      setCameras([]); // avoid undefined
-    } finally {
-      setLoading(false);
-    }
-  };
+    const fetchCameras = async () => {
+      setLoading(true);
+      try {
+        const res = await api.get("/cameras/");
+        const data = Array.isArray(res.data)
+          ? res.data
+          : Array.isArray(res.data?.cameras)
+          ? res.data.cameras
+          : [];
+        setCameras(data);
+      } catch (err) {
+        console.error("Failed to fetch cameras:", err);
+        setCameras([]);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  fetchCameras();
-}, [user]);
+    fetchCameras();
+  }, [user]);
 
-
-  // Add new camera (update state immediately)
+  // ➕ Add new camera
   const handleAddCamera = (newCameraFromBackend) => {
     setCameras((prev) => [...prev, newCameraFromBackend]);
   };
 
-  // Delete camera
+  // ❌ Delete camera
   const handleDeleteCamera = async (id) => {
     if (!window.confirm("Are you sure you want to delete this camera?")) return;
     try {
@@ -66,6 +64,22 @@ export default function LiveView() {
     }
   };
 
+  // 🔔 Global Alert Tone Handler
+  const lastAlertRef = useRef(0);
+  const playAlertTone = () => {
+    const now = Date.now();
+    // Prevent spamming — play once every 1s max
+    if (now - lastAlertRef.current < 1000) return;
+    lastAlertRef.current = now;
+
+    const audio = new Audio("/alert.mp3");
+    audio.volume = 0.8;
+    audio.play().catch(() => {
+      console.warn("⚠️ Alert tone blocked by autoplay policy");
+    });
+  };
+
+  // Stats placeholders (if used elsewhere)
   const totalAlerts = 12;
   const activeCameras = cameras.length;
   const currentAlerts = 3;
@@ -118,6 +132,8 @@ export default function LiveView() {
                   name={cam.name}
                   status={cam.status || "online"}
                   onDelete={() => handleDeleteCamera(cam.id)}
+                  // 🔔 Hook into detection events for global alert
+                  onNewDetection={playAlertTone}
                 />
               ))
             )}
