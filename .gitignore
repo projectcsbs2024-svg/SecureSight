@@ -37,3 +37,5 @@ Thumbs.db
 *.log
 
 
+backend/app/__pycache__/main.cpython-311.pyc
+backend/securesight.db
