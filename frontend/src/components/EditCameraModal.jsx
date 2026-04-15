@@ -8,8 +8,20 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
     latitude: null,
     longitude: null,
     location: "",
+    stream_url: "",
     detections_enabled: ["weapon"],
   });
+
+  const isBrowserPreviewableUrl = (value) => {
+    if (!value) return false;
+    const lower = value.toLowerCase();
+    return (
+      lower.startsWith("http://") ||
+      lower.startsWith("https://") ||
+      lower.startsWith("blob:") ||
+      lower.startsWith("/")
+    );
+  };
 
   // Prefill all values from backend, including map coordinates
   useEffect(() => {
@@ -26,6 +38,7 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
         latitude: camera.latitude ?? null,
         longitude: camera.longitude ?? null,
         location: camera.location || "",
+        stream_url: camera.stream_url || "",
         detections_enabled: detectionsArray.length ? detectionsArray : ["weapon"],
       });
     }
@@ -41,6 +54,16 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
   };
 
   const handleSave = () => {
+    if (!cameraData.name || cameraData.latitude === null || cameraData.longitude === null) {
+      alert("Camera name and location are required");
+      return;
+    }
+
+    if (cameraData.detections_enabled.length === 0) {
+      alert("Select at least one detection type");
+      return;
+    }
+
     onSave({ id: camera.id, ...cameraData });
     onClose();
   };
@@ -114,9 +137,44 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
             />
           </div>
 
-          {/* Right: Detections & Buttons */}
+          {/* Right: Stream URL, Detections & Buttons */}
           <div className="w-full md:w-1/2 p-3 sm:p-4 flex flex-col justify-between">
             <div>
+              <label className="block text-gray-200 font-semibold mb-2 text-sm">
+                Stream URL
+              </label>
+              <input
+                type="text"
+                placeholder="Enter Stream URL or RTSP link"
+                value={cameraData.stream_url}
+                onChange={(e) =>
+                  setCameraData((prev) => ({
+                    ...prev,
+                    stream_url: e.target.value,
+                  }))
+                }
+                className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+              <p className="mb-4 text-xs text-gray-400">
+                Any network source can be saved here and used for detection, including `rtsp://`, `rtmp://`, `http://`, `https://`, and YouTube video links.
+              </p>
+
+              {cameraData.stream_url && isBrowserPreviewableUrl(cameraData.stream_url) && (
+                <div className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600 mb-4">
+                  <video
+                    src={cameraData.stream_url}
+                    className="w-full h-full object-contain"
+                    controls
+                  />
+                </div>
+              )}
+
+              {cameraData.stream_url && !isBrowserPreviewableUrl(cameraData.stream_url) && (
+                <div className="w-full rounded-lg border border-dashed border-gray-600 bg-black/20 p-4 text-xs text-gray-300 mb-4">
+                  Browser preview is not available for this source, but the backend will still use it for detection.
+                </div>
+              )}
+
               <label className="block text-gray-200 font-semibold mb-2 text-sm">
                 Detections
               </label>

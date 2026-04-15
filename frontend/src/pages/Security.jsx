@@ -71,6 +71,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         latitude: updatedCamera.latitude,
         longitude: updatedCamera.longitude,
         location: updatedCamera.location,
+        stream_url: updatedCamera.stream_url?.trim() || null,
         detections_enabled: Object.entries(detectionObj)
           .filter(([_, v]) => v)
           .map(([k]) => k),

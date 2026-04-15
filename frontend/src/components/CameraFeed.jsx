@@ -31,6 +31,17 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
     );
   };
 
+  const isBrowserPlayableSrc = (s) => {
+    if (!s) return false;
+    const lower = s.toLowerCase();
+    return (
+      lower.startsWith("http://") ||
+      lower.startsWith("https://") ||
+      lower.startsWith("/") ||
+      lower.startsWith("blob:")
+    );
+  };
+
   // ---- WebSocket connection ----
   useEffect(() => {
     let closedByUs = false;
@@ -337,29 +348,45 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
     >
       {src ? (
         <div className="relative w-full aspect-video">
-          <video
-            ref={videoRef}
-            src={src}
-            muted
-            playsInline
-            loop={false}
-            className="rounded-xl w-full h-full object-cover select-none"
-            style={{ display: "block" }}
-          />
+          {isBrowserPlayableSrc(src) ? (
+            <video
+              ref={videoRef}
+              src={src}
+              muted
+              playsInline
+              loop={false}
+              className="rounded-xl w-full h-full object-cover select-none"
+              style={{ display: "block" }}
+            />
+          ) : (
+            <div className="rounded-xl w-full h-full bg-gray-900 text-gray-200 flex items-center justify-center text-center px-6">
+              <div>
+                <div className="text-sm font-semibold">{name}</div>
+                <div className="mt-2 text-xs text-gray-400">
+                  This stream source is being processed by the backend detector.
+                </div>
+                <div className="mt-1 text-xs text-gray-500 break-all">
+                  {src}
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Overlays */}
-          <div
-            style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              bottom: 0,
-              pointerEvents: "none",
-            }}
-          >
-            {renderOverlays()}
-          </div>
+          {isBrowserPlayableSrc(src) && (
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                pointerEvents: "none",
+              }}
+            >
+              {renderOverlays()}
+            </div>
+          )}
 
           {/* Fade-out overlay when stream ends */}
           {isStreamFinished && (

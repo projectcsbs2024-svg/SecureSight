@@ -8,6 +8,7 @@ from app.services.scuffle_detection import ScuffleSequenceDetector
 from app.services.weapon_detection import detect_weapons_from_frame
 import time
 import asyncio
+from urllib.parse import urlparse
 from app.services.ws_manager import ws_manager
 
 
@@ -51,21 +52,19 @@ class CameraStreamWorker:
         Each thread uses its own DB session.
         """
         db = SessionLocal()
-        cap = cv2.VideoCapture(self.camera.stream_url)
+        resolved_stream_url = self._resolve_stream_source(self.camera.stream_url)
+        cap = cv2.VideoCapture(resolved_stream_url)
 
         if not cap.isOpened():
-            print(f"[WeaponWorker] Failed to open camera stream: {self.camera.id} ({self.camera.stream_url})")
+            print(
+                f"[WeaponWorker] Failed to open camera stream: {self.camera.id} "
+                f"(original={self.camera.stream_url}, resolved={resolved_stream_url})"
+            )
             db.close()
             return
 
-        # Detect if this is RTSP/IP camera or local file
-        is_rtsp_like = False
-        try:
-            src = (self.camera.stream_url or "").lower()
-            if src.startswith("rtsp://") or src.startswith("rtmp://") or (src.startswith("http://") and "live" in src):
-                is_rtsp_like = True
-        except Exception:
-            is_rtsp_like = False
+        # Treat any network URL as a live stream and local/uploads paths as file sources.
+        is_live_stream = self._is_live_stream_source(self.camera.stream_url)
 
         while self.running:
             ret, frame = cap.read()
@@ -77,7 +76,7 @@ class CameraStreamWorker:
             # capture timestamp for file-based videos
             try:
                 frame_time_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-                if not is_rtsp_like:
+                if not is_live_stream:
                     self.manager.current_positions[self.camera.id] = frame_time_ms or 0
             except Exception:
                 frame_time_ms = None
@@ -138,6 +137,73 @@ class CameraStreamWorker:
 
         cap.release()
         db.close()
+
+    @staticmethod
+    def _is_live_stream_source(stream_url: str) -> bool:
+        if not stream_url:
+            return False
+
+        try:
+            parsed = urlparse(stream_url)
+            scheme = (parsed.scheme or "").lower()
+
+            if scheme in {"rtsp", "rtsps", "rtmp", "rtmps", "udp", "tcp"}:
+                return True
+
+            if scheme in {"http", "https"}:
+                path = (parsed.path or "").lower()
+                file_extensions = (
+                    ".mp4",
+                    ".mkv",
+                    ".avi",
+                    ".mov",
+                    ".webm",
+                    ".m4v",
+                    ".mpeg",
+                    ".mpg",
+                )
+                return not path.endswith(file_extensions)
+        except Exception:
+            return False
+
+        return False
+
+    @staticmethod
+    def _resolve_stream_source(stream_url: str) -> str:
+        if not stream_url:
+            return stream_url
+
+        if not CameraStreamWorker._is_youtube_url(stream_url):
+            return stream_url
+
+        try:
+            import yt_dlp
+
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "noplaylist": True,
+                "format": "best[ext=mp4]/best",
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(stream_url, download=False)
+                direct_url = info.get("url")
+                if direct_url:
+                    print(f"[WeaponWorker] Resolved YouTube URL for detection: {stream_url}")
+                    return direct_url
+        except Exception as e:
+            print(f"[WeaponWorker] Failed to resolve YouTube URL {stream_url}: {e}")
+
+        return stream_url
+
+    @staticmethod
+    def _is_youtube_url(stream_url: str) -> bool:
+        try:
+            host = (urlparse(stream_url).hostname or "").lower()
+        except Exception:
+            return False
+
+        return host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 
 
 class WeaponDetectionManager:

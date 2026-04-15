@@ -14,3 +14,4 @@ ultralytics
 opencv-python
 torch
 scikit-learn
+yt-dlp

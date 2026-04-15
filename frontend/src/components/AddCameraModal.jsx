@@ -17,6 +17,17 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
     "scuffle",
   ]);
 
+  const isBrowserPreviewableUrl = (value) => {
+    if (!value) return false;
+    const lower = value.toLowerCase();
+    return (
+      lower.startsWith("http://") ||
+      lower.startsWith("https://") ||
+      lower.startsWith("blob:") ||
+      lower.startsWith("/")
+    );
+  };
+
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
     if (selected) setFile(selected);
@@ -31,7 +42,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
   };
 
   const handleAdd = async () => {
-    let streamUrl = url;
+    let streamUrl = url.trim();
     if (mode === "file" && file) {
       try {
         setUploading(true);
@@ -54,6 +65,11 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
 
     if (!name || latitude === null || longitude === null) {
       alert("Camera name and location are required");
+      return;
+    }
+
+    if (mode === "url" && !streamUrl) {
+      alert("Stream URL is required when using URL mode");
       return;
     }
 
@@ -197,9 +213,9 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
               {mode === "file" ? (
                 <div className="mb-3">
                   <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => document.getElementById("cameraFileInput").click()}
-                      className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-xs sm:text-sm hover:bg-teal-600 transition-all"
+                <button
+                  onClick={() => document.getElementById("cameraFileInput").click()}
+                  className="px-3 py-1.5 rounded-lg bg-gray-700 text-white text-xs sm:text-sm hover:bg-teal-600 transition-all"
                     >
                       Choose File
                     </button>
@@ -234,12 +250,15 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                 <>
                   <input
                     type="text"
-                    placeholder="Enter camera stream URL"
+                    placeholder="Enter Stream URL or RTSP link"
                     value={url}
                     onChange={(e) => setUrl(e.target.value)}
                     className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg mb-3 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
                   />
-                  {url && (
+                  <p className="mb-3 text-xs text-gray-400">
+                    Any network source is accepted here, including `rtsp://`, `rtmp://`, `http://`, `https://`, and YouTube video links.
+                  </p>
+                  {url && isBrowserPreviewableUrl(url) && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -252,6 +271,11 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                         controls
                       />
                     </motion.div>
+                  )}
+                  {url && !isBrowserPreviewableUrl(url) && (
+                    <div className="w-full rounded-lg border border-dashed border-gray-600 bg-black/20 p-4 text-xs text-gray-300">
+                      Browser preview is not available for this source, but the URL will still be saved and used by the backend detector.
+                    </div>
                   )}
                 </>
               )}
@@ -272,6 +296,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   !name ||
                   latitude === null ||
                   longitude === null ||
+                  (mode === "url" && !url.trim()) ||
                   detectionsEnabled.length === 0
                 }
                 className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm transition-all ${
@@ -279,6 +304,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   !name ||
                   latitude === null ||
                   longitude === null ||
+                  (mode === "url" && !url.trim()) ||
                   detectionsEnabled.length === 0
                     ? "bg-gray-500 cursor-not-allowed"
                     : "bg-primary hover:bg-teal-600"
