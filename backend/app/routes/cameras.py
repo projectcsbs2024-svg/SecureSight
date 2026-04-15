@@ -14,7 +14,7 @@ import csv
 from fastapi.responses import StreamingResponse
 from io import StringIO
 
-# Import YOLO weapon detection manager singleton
+# Import stream detection manager singleton
 from app.services.weapon_worker import weapon_manager
 from app.services.ws_manager import ws_manager
 
@@ -78,9 +78,9 @@ def add_camera(
     db.commit()
     db.refresh(new_camera)
 
-    # Start YOLO weapon detection if enabled
-    if "weapon" in (new_camera.detections_enabled or []):
-        weapon_manager.start_worker(new_camera.id)  # <-- only camera_id now
+    # Start stream detection if any realtime detector is enabled
+    if any(det in (new_camera.detections_enabled or []) for det in ["weapon", "scuffle"]):
+        weapon_manager.start_worker(new_camera.id)
 
     return new_camera
 
@@ -114,8 +114,8 @@ def update_camera(
     db.commit()
     db.refresh(db_camera)
 
-    # Start/stop YOLO worker based on detections_enabled
-    if "weapon" in (db_camera.detections_enabled or []):
+    # Start/stop stream worker based on enabled realtime detections
+    if any(det in (db_camera.detections_enabled or []) for det in ["weapon", "scuffle"]):
         # restart to pick up any stream_url change
         weapon_manager.stop_worker(db_camera.id)  # stop if already running
         weapon_manager.start_worker(db_camera.id)

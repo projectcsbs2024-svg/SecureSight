@@ -4,6 +4,7 @@ import cv2
 from threading import Thread
 from app.database import SessionLocal
 from app.models import Camera
+from app.services.scuffle_detection import ScuffleSequenceDetector
 from app.services.weapon_detection import detect_weapons_from_frame
 import time
 import asyncio
@@ -16,6 +17,12 @@ class CameraStreamWorker:
         self.manager = manager  # reference to WeaponDetectionManager
         self.running = False
         self.thread = None
+        enabled_detectors = camera.detections_enabled or []
+        self.weapon_enabled = "weapon" in enabled_detectors
+        self.scuffle_enabled = "scuffle" in enabled_detectors
+        self.scuffle_detector = ScuffleSequenceDetector() if self.scuffle_enabled else None
+        if self.scuffle_detector and not self.scuffle_detector.ready and self.scuffle_detector.error:
+            print(f"[WeaponWorker] Scuffle detector unavailable for camera {camera.id}: {self.scuffle_detector.error}")
 
         # initial skip config
         self.frame_skip = 1
@@ -86,7 +93,11 @@ class CameraStreamWorker:
 
             try:
                 start = time.time()
-                detections = detect_weapons_from_frame(frame, self.camera.id, frame_time_ms)
+                detections = []
+                if self.weapon_enabled:
+                    detections.extend(detect_weapons_from_frame(frame, self.camera.id, frame_time_ms))
+                if self.scuffle_detector:
+                    detections.extend(self.scuffle_detector.process_frame(frame, self.camera.id, frame_time_ms))
                 processing_ms = int((time.time() - start) * 1000)
 
                 # update moving average
@@ -101,9 +112,7 @@ class CameraStreamWorker:
 
                 # print adaptive status occasionally
                 if time.time() - self.last_detection_time > 5:
-                    print(
-                        f"[WeaponWorker] {self.camera.id} avg_proc={self._avg_proc_ms:.1f}ms, skip={self.frame_skip}"
-                    )
+                    print(f"[WeaponWorker] {self.camera.id} avg_proc={self._avg_proc_ms:.1f}ms, skip={self.frame_skip}")
                     self.last_detection_time = time.time()
 
                 # Broadcast detections if any
@@ -153,8 +162,9 @@ class WeaponDetectionManager:
             print(f"[WeaponManager] Camera {camera_id} not found.")
             return
 
-        if "weapon" not in (camera.detections_enabled or []):
-            print(f"[WeaponManager] Weapon detection not enabled for camera {camera_id}. Skipping.")
+        enabled_detectors = camera.detections_enabled or []
+        if "weapon" not in enabled_detectors and "scuffle" not in enabled_detectors:
+            print(f"[WeaponManager] No stream detection enabled for camera {camera_id}. Skipping.")
             return
 
         worker = CameraStreamWorker(camera, self)
@@ -175,7 +185,8 @@ class WeaponDetectionManager:
         db.close()
 
         for cam in cameras:
-            if cam.stream_url and "weapon" in (cam.detections_enabled or []):
+            enabled_detectors = cam.detections_enabled or []
+            if cam.stream_url and ("weapon" in enabled_detectors or "scuffle" in enabled_detectors):
                 self.start_worker(cam.id)
 
         print(f"[WeaponManager] Started {len(self.workers)} camera stream workers.")

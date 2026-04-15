@@ -12,3 +12,5 @@ python-jose
 fastapi[all]
 ultralytics 
 opencv-python
+torch
+scikit-learn

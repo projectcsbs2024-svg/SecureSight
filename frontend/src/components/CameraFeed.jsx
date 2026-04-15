@@ -81,6 +81,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
                 ...msg.detections.map((det) => ({
                   id: det.detection_id ?? `${timestamp}_${Math.random()}`,
                   bbox: det.bbox || [0, 0, 0, 0],
+                  type: det.type || "weapon",
                   subtype: det.subtype,
                   confidence: det.confidence,
                   frameTime: det.frame_time_ms ? det.frame_time_ms / 1000 : null,
@@ -266,12 +267,21 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
         const w = Math.max(2, (nx2 - nx1) * width);
         const h = Math.max(2, (ny2 - ny1) * height);
         const borderColor =
-          a.subtype === "knife"
+          a.type === "scuffle"
+            ? "rgba(255,165,0,0.95)"
+            : a.subtype === "knife"
             ? "rgba(255,0,0,0.9)"
             : "rgba(0,255,0,0.9)";
-        const label = `${a.subtype ?? "weapon"} ${
-          a.confidence ? a.confidence.toFixed(2) : ""
-        }`;
+        const fillColor =
+          a.type === "scuffle" ? "rgba(255,165,0,0.10)" : "rgba(0,255,0,0.05)";
+        const glowColor =
+          a.type === "scuffle" ? "rgba(255,165,0,0.35)" : "rgba(0,255,0,0.3)";
+        const label =
+          a.type === "scuffle"
+            ? `scuffle${a.subtype ? ` (${a.subtype})` : ""} ${
+                a.confidence ? a.confidence.toFixed(2) : ""
+              }`.trim()
+            : `${a.subtype ?? "weapon"} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim();
 
         return (
           <div
@@ -284,8 +294,8 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
               height: `${h}px`,
               border: `2px solid ${borderColor}`,
               borderRadius: "6px",
-              background: "rgba(0,255,0,0.05)",
-              boxShadow: "0 0 10px rgba(0,255,0,0.3)",
+              background: fillColor,
+              boxShadow: `0 0 10px ${glowColor}`,
               pointerEvents: "none",
               zIndex: 40,
             }}

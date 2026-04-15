@@ -77,7 +77,8 @@ async def startup_event():
         db_cameras = db.query(Camera).all()
         cameras_to_run = [
             cam for cam in db_cameras
-            if cam.detections_enabled and "weapon" in cam.detections_enabled
+            if cam.detections_enabled
+            and ("weapon" in cam.detections_enabled or "scuffle" in cam.detections_enabled)
         ]
 
         for cam in cameras_to_run:
