@@ -16,6 +16,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
     stampede: 50,
   });
   const [loading, setLoading] = useState(true);
+  const [sendingTest, setSendingTest] = useState(false);
 
   // Load user settings from backend
   useEffect(() => {
@@ -64,10 +65,12 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
     if (!user) return;
     try {
       const token = await user.getIdToken();
+      const cleanedEmails = alertEmails.map((email) => email.trim()).filter(Boolean);
+      setAlertEmails(cleanedEmails);
       await api.post(
         "/settings/",
         {
-          alert_emails: alertEmails,
+          alert_emails: cleanedEmails,
           weapon_threshold: thresholds.weapon / 100,
           scuffle_threshold: thresholds.scuffle / 100,
           stampede_threshold: thresholds.stampede / 100,
@@ -78,6 +81,27 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
     } catch (err) {
       console.error("Error saving settings:", err);
       alert("Failed to save settings.");
+    }
+  };
+
+  const handleSendTestEmail = async () => {
+    if (!user) return;
+    try {
+      setSendingTest(true);
+      const token = await user.getIdToken();
+      const res = await api.post(
+        "/settings/test_email",
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      alert(res.data.message || "Test email sent.");
+    } catch (err) {
+      console.error("Error sending test email:", err);
+      alert(
+        err?.response?.data?.detail || "Failed to send test email. Check backend SMTP settings."
+      );
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -142,6 +166,9 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
             >
               Add Email
             </button>
+            <p className="text-xs text-gray-400 mt-3">
+              Alert emails are used for live detection notifications. SMTP must be configured on the backend.
+            </p>
           </div>
 
           {/* Detection Sensitivity */}
@@ -169,7 +196,18 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
             ))}
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={handleSendTestEmail}
+              disabled={sendingTest}
+              className={`px-4 py-2 rounded ${
+                sendingTest
+                  ? "bg-gray-600 cursor-not-allowed text-gray-200"
+                  : "bg-blue-600 text-white hover:bg-blue-700"
+              }`}
+            >
+              {sendingTest ? "Sending Test..." : "Send Test Email"}
+            </button>
             <button
               onClick={handleSaveSettings}
               className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"

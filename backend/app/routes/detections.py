@@ -1,6 +1,7 @@
 import os
 import shutil
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -168,6 +169,67 @@ def get_detection_stats(request: Request, db: Session = Depends(get_db)):
         "total_today": total_today,
         "active": active,
         "resolved": resolved
+    }
+
+
+@router.get("/analytics/summary")
+def get_detection_analytics(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    cameras = db.query(Camera).filter(Camera.user_id == user.id).all()
+    detections = (
+        db.query(Detection)
+        .filter(Detection.user_id == user.id)
+        .order_by(Detection.timestamp.desc())
+        .all()
+    )
+
+    total_cameras = len(cameras)
+    active_alerts = sum(1 for det in detections if str(det.status or "").lower() == "active")
+    resolved_alerts = sum(1 for det in detections if str(det.status or "").lower() == "resolved")
+    total_alerts = len(detections)
+
+    type_counter = Counter(det.type or "unknown" for det in detections)
+    camera_counter = Counter((det.camera.name if det.camera else str(det.camera_id)) for det in detections)
+
+    today = datetime.utcnow().date()
+    daily_trend = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        count = sum(1 for det in detections if det.timestamp and det.timestamp.date() == day)
+        daily_trend.append({"date": day.isoformat(), "count": count})
+
+    recent_alerts = [
+        {
+            "id": det.id,
+            "camera_name": det.camera.name if det.camera else str(det.camera_id),
+            "type": det.type,
+            "subtype": det.subtype,
+            "confidence": det.confidence,
+            "status": det.status,
+            "timestamp": det.timestamp,
+        }
+        for det in detections[:5]
+    ]
+
+    return {
+        "summary": {
+            "total_cameras": total_cameras,
+            "total_alerts": total_alerts,
+            "active_alerts": active_alerts,
+            "resolved_alerts": resolved_alerts,
+        },
+        "type_distribution": [
+            {"label": key.title(), "value": value}
+            for key, value in sorted(type_counter.items())
+        ],
+        "camera_activity": [
+            {"label": key, "value": value}
+            for key, value in camera_counter.most_common(5)
+        ],
+        "daily_trend": daily_trend,
+        "recent_alerts": recent_alerts,
     }
 
 

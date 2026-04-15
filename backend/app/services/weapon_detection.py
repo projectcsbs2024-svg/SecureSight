@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from ultralytics import YOLO
 from app.database import SessionLocal
 from app.models import Detection, Camera, UserSetting
+from app.services.email_service import notify_detection_async
 
 # ----------------------------------------------------
 # Paths
@@ -60,12 +61,18 @@ def detect_weapons_from_frame(frame, camera_id: str, frame_time_ms: float | None
             return detections_logged
 
         user_id = camera.user_id
+        camera_name = camera.name or str(camera.id)
 
         # ----------------------------------------------------
         # Get user's threshold (default 0.8 if not set)
         # ----------------------------------------------------
         settings = db.query(UserSetting).filter(UserSetting.user_id == user_id).first()
         weapon_threshold = settings.weapon_threshold if settings else 0.8
+        recipients = []
+        if settings and settings.alert_emails:
+            recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
+        elif camera.user and camera.user.email:
+            recipients = [camera.user.email]
 
         timestamp = datetime.now(timezone.utc)
 
@@ -135,6 +142,7 @@ def detect_weapons_from_frame(frame, camera_id: str, frame_time_ms: float | None
                     detections_logged.append({
                         "detection_id": detection.id,
                         "camera_id": camera.id,
+                        "type": "weapon",
                         "subtype": subtype,
                         "confidence": conf,
                         "timestamp": timestamp.isoformat(),
@@ -163,7 +171,19 @@ def detect_weapons_from_frame(frame, camera_id: str, frame_time_ms: float | None
                 db.query(Detection).filter(Detection.id == det["detection_id"]).update(
                     {"image_url": relative_url}
                 )
+                det["image_url"] = relative_url
             db.commit()
+
+            for det in detections_logged:
+                notify_detection_async(
+                    recipients=recipients,
+                    camera_name=camera_name,
+                    detection_type="weapon",
+                    subtype=det["subtype"],
+                    confidence=det["confidence"],
+                    timestamp=det["timestamp"],
+                    image_url=det.get("image_url"),
+                )
 
     except Exception as e:
         print(f"[WeaponDetection] Error running detection: {e}")

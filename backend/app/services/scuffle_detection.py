@@ -13,6 +13,7 @@ from ultralytics import YOLO
 
 from app.database import SessionLocal
 from app.models import Camera, Detection, UserSetting
+from app.services.email_service import notify_detection_async
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DETECTION_FOLDER = os.path.join(BASE_DIR, "static", "detections")
@@ -267,6 +268,11 @@ def _save_scuffle_detection(
 
         settings = db.query(UserSetting).filter(UserSetting.user_id == camera.user_id).first()
         scuffle_threshold = settings.scuffle_threshold if settings else 0.7
+        recipients = []
+        if settings and settings.alert_emails:
+            recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
+        elif camera.user and camera.user.email:
+            recipients = [camera.user.email]
         if confidence < scuffle_threshold:
             return detections_logged
 
@@ -323,6 +329,15 @@ def _save_scuffle_detection(
                 "bbox": bbox,
                 "frame_time_ms": frame_time_ms,
             }
+        )
+        notify_detection_async(
+            recipients=recipients,
+            camera_name=camera.name or str(camera.id),
+            detection_type="scuffle",
+            subtype=subtype,
+            confidence=confidence,
+            timestamp=timestamp.isoformat(),
+            image_url=relative_url,
         )
         print(f"[ScuffleDetection] Detected {subtype} with {confidence:.2f} confidence")
     except Exception as exc:

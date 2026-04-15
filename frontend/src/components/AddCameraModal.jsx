@@ -12,10 +12,22 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
   const [file, setFile] = useState(null);
   const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [detectionsEnabled, setDetectionsEnabled] = useState([
+    "weapon",
+    "scuffle",
+  ]);
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
     if (selected) setFile(selected);
+  };
+
+  const toggleDetection = (type) => {
+    setDetectionsEnabled((prev) =>
+      prev.includes(type)
+        ? prev.filter((item) => item !== type)
+        : [...prev, type]
+    );
   };
 
   const handleAdd = async () => {
@@ -45,13 +57,18 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
       return;
     }
 
+    if (detectionsEnabled.length === 0) {
+      alert("Select at least one detection type");
+      return;
+    }
+
     const newCamera = {
       name,
       latitude,
       longitude,
       location,
       stream_url: streamUrl,
-      detections_enabled: ["weapon"],
+      detections_enabled: detectionsEnabled,
     };
 
     try {
@@ -129,6 +146,31 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
           {/* Right Section — Upload/Stream + Buttons */}
           <div className="w-full md:w-1/2 p-3 sm:p-4 flex flex-col justify-between">
             <div>
+              <div className="mb-4">
+                <label className="block text-gray-200 font-semibold mb-2 text-sm">
+                  Enabled detections
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {["weapon", "scuffle", "stampede"].map((type) => (
+                    <label
+                      key={type}
+                      className="flex items-center gap-2 rounded-lg bg-gray-700 px-3 py-2 text-xs sm:text-sm text-gray-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={detectionsEnabled.includes(type)}
+                        onChange={() => toggleDetection(type)}
+                        className="accent-primary"
+                      />
+                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                    </label>
+                  ))}
+                </div>
+                <p className="mt-2 text-xs text-gray-400">
+                  New cameras start with Weapon and Scuffle enabled by default.
+                </p>
+              </div>
+
               <div className="flex justify-center space-x-2 mb-3">
                 <button
                   onClick={() => setMode("file")}
@@ -226,10 +268,18 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
               <button
                 onClick={handleAdd}
                 disabled={
-                  uploading || !name || latitude === null || longitude === null
+                  uploading ||
+                  !name ||
+                  latitude === null ||
+                  longitude === null ||
+                  detectionsEnabled.length === 0
                 }
                 className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm transition-all ${
-                  uploading || !name || latitude === null || longitude === null
+                  uploading ||
+                  !name ||
+                  latitude === null ||
+                  longitude === null ||
+                  detectionsEnabled.length === 0
                     ? "bg-gray-500 cursor-not-allowed"
                     : "bg-primary hover:bg-teal-600"
                 }`}

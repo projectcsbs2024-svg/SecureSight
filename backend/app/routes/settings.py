@@ -1,10 +1,13 @@
 # app/routes/settings.py
-from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
 from app.models import UserSetting
 from app.routes.auth import get_current_user
+from app.services.email_service import email_service_ready, send_detection_alert_email
 
 router = APIRouter(prefix="/settings", tags=["Settings"])
 
@@ -64,3 +67,31 @@ def create_or_update_settings_safe(req: SettingsRequest, user=Depends(get_curren
         scuffle_threshold=settings.scuffle_threshold,
         stampede_threshold=settings.stampede_threshold
     )
+
+
+@router.post("/test_email")
+def send_test_email(user=Depends(get_current_user), db: Session = Depends(get_db)):
+    settings = db.query(UserSetting).filter(UserSetting.user_id == user.id).first()
+    recipients = []
+    if settings and settings.alert_emails:
+        recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
+    elif user.email:
+        recipients = [user.email]
+
+    if not recipients:
+        raise HTTPException(status_code=400, detail="No alert recipient emails configured")
+
+    ready, reason = email_service_ready()
+    if not ready:
+        raise HTTPException(status_code=400, detail=f"Email service not configured: {reason}")
+
+    send_detection_alert_email(
+        recipients=recipients,
+        camera_name="SecureSight Test Camera",
+        detection_type="test-alert",
+        subtype="settings-check",
+        confidence=1.0,
+        timestamp=datetime.now(timezone.utc).isoformat(),
+        image_url=None,
+    )
+    return {"message": f"Test email sent to {len(recipients)} recipient(s)"}
