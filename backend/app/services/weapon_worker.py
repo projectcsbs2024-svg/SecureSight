@@ -53,6 +53,8 @@ class CameraStreamWorker:
         """
         db = SessionLocal()
         resolved_stream_url = self._resolve_stream_source(self.camera.stream_url)
+        source_kind = self._classify_stream_source(self.camera.stream_url)
+        is_seekable_media = source_kind in {"file", "youtube", "media_url"}
         cap = cv2.VideoCapture(resolved_stream_url)
 
         if not cap.isOpened():
@@ -60,83 +62,113 @@ class CameraStreamWorker:
                 f"[WeaponWorker] Failed to open camera stream: {self.camera.id} "
                 f"(original={self.camera.stream_url}, resolved={resolved_stream_url})"
             )
+            self.manager.mark_stream_state(
+                self.camera.id,
+                current_time_ms=0,
+                ended=False,
+                source_kind=source_kind,
+            )
+            self.manager.worker_finished(self.camera.id)
             db.close()
             return
 
-        # Treat any network URL as a live stream and local/uploads paths as file sources.
-        is_live_stream = self._is_live_stream_source(self.camera.stream_url)
+        self.manager.mark_stream_state(
+            self.camera.id,
+            current_time_ms=0,
+            ended=False,
+            source_kind=source_kind,
+        )
 
-        while self.running:
-            ret, frame = cap.read()
-            if not ret or frame is None:
-                # for live streams, avoid tight loop on failed reads
-                time.sleep(0.05)
-                continue
+        try:
+            while self.running:
+                ret, frame = cap.read()
+                if not ret or frame is None:
+                    if is_seekable_media:
+                        last_pos = self.manager.current_positions.get(self.camera.id, 0)
+                        self.manager.mark_stream_state(
+                            self.camera.id,
+                            current_time_ms=last_pos,
+                            ended=True,
+                            source_kind=source_kind,
+                        )
+                        print(f"[WeaponWorker] Stream ended for camera {self.camera.id}")
+                        break
 
-            # capture timestamp for file-based videos
-            try:
-                frame_time_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
-                if not is_live_stream:
-                    self.manager.current_positions[self.camera.id] = frame_time_ms or 0
-            except Exception:
-                frame_time_ms = None
+                    # for live streams, avoid tight loop on failed reads
+                    time.sleep(0.05)
+                    continue
 
-            # ------------------------------------------
-            # Dynamic frame skipping logic
-            # ------------------------------------------
-            self._frame_counter += 1
+                # capture timestamp for file-based videos
+                try:
+                    frame_time_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    if is_seekable_media:
+                        self.manager.mark_stream_state(
+                            self.camera.id,
+                            current_time_ms=frame_time_ms or 0,
+                            ended=False,
+                            source_kind=source_kind,
+                        )
+                except Exception:
+                    frame_time_ms = None
 
-            # skip frames based on self.frame_skip (adaptive)
-            if self._frame_counter % (self.frame_skip + 1) != 0:
-                continue
+                # ------------------------------------------
+                # Dynamic frame skipping logic
+                # ------------------------------------------
+                self._frame_counter += 1
 
-            try:
-                start = time.time()
-                detections = []
-                if self.weapon_enabled:
-                    detections.extend(detect_weapons_from_frame(frame, self.camera.id, frame_time_ms))
-                if self.scuffle_detector:
-                    detections.extend(self.scuffle_detector.process_frame(frame, self.camera.id, frame_time_ms))
-                processing_ms = int((time.time() - start) * 1000)
+                # skip frames based on self.frame_skip (adaptive)
+                if self._frame_counter % (self.frame_skip + 1) != 0:
+                    continue
 
-                # update moving average
-                alpha = 0.3  # smoothing factor
-                self._avg_proc_ms = (1 - alpha) * self._avg_proc_ms + alpha * processing_ms
+                try:
+                    start = time.time()
+                    detections = []
+                    if self.weapon_enabled:
+                        detections.extend(detect_weapons_from_frame(frame, self.camera.id, frame_time_ms))
+                    if self.scuffle_detector:
+                        detections.extend(self.scuffle_detector.process_frame(frame, self.camera.id, frame_time_ms))
+                    processing_ms = int((time.time() - start) * 1000)
 
-                # adapt skip dynamically
-                if self._avg_proc_ms > self.frame_skip_target * 1.3:
-                    self.frame_skip = min(self.frame_skip + 1, 10)
-                elif self._avg_proc_ms < self.frame_skip_target * 0.7:
-                    self.frame_skip = max(self.frame_skip - 1, 0)
+                    # update moving average
+                    alpha = 0.3  # smoothing factor
+                    self._avg_proc_ms = (1 - alpha) * self._avg_proc_ms + alpha * processing_ms
 
-                # print adaptive status occasionally
-                if time.time() - self.last_detection_time > 5:
-                    print(f"[WeaponWorker] {self.camera.id} avg_proc={self._avg_proc_ms:.1f}ms, skip={self.frame_skip}")
-                    self.last_detection_time = time.time()
+                    # adapt skip dynamically
+                    if self._avg_proc_ms > self.frame_skip_target * 1.3:
+                        self.frame_skip = min(self.frame_skip + 1, 10)
+                    elif self._avg_proc_ms < self.frame_skip_target * 0.7:
+                        self.frame_skip = max(self.frame_skip - 1, 0)
 
-                # Broadcast detections if any
-                if detections:
-                    payload = {
-                        "camera_id": self.camera.id,
-                        "processing_ms": processing_ms,
-                        "detections": detections,
-                    }
-                    if ws_manager.loop:
-                        try:
-                            asyncio.run_coroutine_threadsafe(
-                                ws_manager.broadcast(self.camera.id, payload),
-                                ws_manager.loop,
-                            )
-                        except Exception as e:
-                            print(f"[WeaponWorker] Failed to schedule WS broadcast: {e}")
-                    else:
-                        print("[WeaponWorker] ws_manager.loop not set; cannot broadcast")
+                    # print adaptive status occasionally
+                    if time.time() - self.last_detection_time > 5:
+                        print(f"[WeaponWorker] {self.camera.id} avg_proc={self._avg_proc_ms:.1f}ms, skip={self.frame_skip}")
+                        self.last_detection_time = time.time()
 
-            except Exception as e:
-                print(f"[WeaponWorker] Error detecting weapons for camera {self.camera.id}: {e}")
+                    # Broadcast detections if any
+                    if detections:
+                        payload = {
+                            "camera_id": self.camera.id,
+                            "processing_ms": processing_ms,
+                            "detections": detections,
+                        }
+                        if ws_manager.loop:
+                            try:
+                                asyncio.run_coroutine_threadsafe(
+                                    ws_manager.broadcast(self.camera.id, payload),
+                                    ws_manager.loop,
+                                )
+                            except Exception as e:
+                                print(f"[WeaponWorker] Failed to schedule WS broadcast: {e}")
+                        else:
+                            print("[WeaponWorker] ws_manager.loop not set; cannot broadcast")
 
-        cap.release()
-        db.close()
+                except Exception as e:
+                    print(f"[WeaponWorker] Error detecting weapons for camera {self.camera.id}: {e}")
+        finally:
+            cap.release()
+            db.close()
+            self.running = False
+            self.manager.worker_finished(self.camera.id)
 
     @staticmethod
     def _is_live_stream_source(stream_url: str) -> bool:
@@ -167,6 +199,46 @@ class CameraStreamWorker:
             return False
 
         return False
+
+    @staticmethod
+    def _classify_stream_source(stream_url: str) -> str:
+        if not stream_url:
+            return "unknown"
+
+        try:
+            parsed = urlparse(stream_url)
+            scheme = (parsed.scheme or "").lower()
+            host = (parsed.hostname or "").lower()
+            path = (parsed.path or "").lower()
+        except Exception:
+            return "unknown"
+
+        if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
+            return "youtube"
+
+        if scheme in {"rtsp", "rtsps", "rtmp", "rtmps", "udp", "tcp"}:
+            return "live"
+
+        if path.startswith("/videos/") or path.startswith("/uploads/"):
+            return "file"
+
+        file_extensions = (
+            ".mp4",
+            ".mkv",
+            ".avi",
+            ".mov",
+            ".webm",
+            ".m4v",
+            ".mpeg",
+            ".mpg",
+        )
+        if path.endswith(file_extensions):
+            return "media_url"
+
+        if scheme in {"http", "https"}:
+            return "live"
+
+        return "unknown"
 
     @staticmethod
     def _resolve_stream_source(stream_url: str) -> str:
@@ -214,11 +286,39 @@ class WeaponDetectionManager:
     def __init__(self):
         self.workers = {}  # camera_id -> CameraStreamWorker
         self.current_positions = {}  # camera_id -> last frame time in ms (for file-based streams)
+        self.stream_states = {}  # camera_id -> metadata used by the frontend player
+
+    def mark_stream_state(
+        self,
+        camera_id: str,
+        current_time_ms: float | int | None = None,
+        ended: bool | None = None,
+        source_kind: str | None = None,
+    ):
+        state = self.stream_states.setdefault(
+            camera_id,
+            {"current_time_ms": 0, "ended": False, "source_kind": "unknown"},
+        )
+        if current_time_ms is not None:
+            state["current_time_ms"] = int(current_time_ms or 0)
+            self.current_positions[camera_id] = int(current_time_ms or 0)
+        if ended is not None:
+            state["ended"] = ended
+        if source_kind is not None:
+            state["source_kind"] = source_kind
+
+    def worker_finished(self, camera_id: str):
+        worker = self.workers.get(camera_id)
+        if worker and not worker.running:
+            self.workers.pop(camera_id, None)
 
     def start_worker(self, camera_id: str):
-        if camera_id in self.workers:
-            print(f"[WeaponManager] Weapon detection already running for camera {camera_id}")
-            return
+        existing_worker = self.workers.get(camera_id)
+        if existing_worker:
+            if existing_worker.running:
+                print(f"[WeaponManager] Weapon detection already running for camera {camera_id}")
+                return
+            self.workers.pop(camera_id, None)
 
         db = SessionLocal()
         camera = db.query(Camera).filter(Camera.id == camera_id).first()
@@ -233,6 +333,8 @@ class WeaponDetectionManager:
             print(f"[WeaponManager] No stream detection enabled for camera {camera_id}. Skipping.")
             return
 
+        source_kind = CameraStreamWorker._classify_stream_source(camera.stream_url)
+        self.mark_stream_state(camera_id, current_time_ms=0, ended=False, source_kind=source_kind)
         worker = CameraStreamWorker(camera, self)
         worker.start()
         self.workers[camera_id] = worker
@@ -241,9 +343,15 @@ class WeaponDetectionManager:
         worker = self.workers.get(camera_id)
         if worker:
             worker.stop()
-            del self.workers[camera_id]
+            self.workers.pop(camera_id, None)
             if camera_id in self.current_positions:
                 del self.current_positions[camera_id]
+        self.stream_states.pop(camera_id, None)
+
+    def replay_worker(self, camera_id: str):
+        self.stop_worker(camera_id)
+        self.mark_stream_state(camera_id, current_time_ms=0, ended=False, source_kind="unknown")
+        self.start_worker(camera_id)
 
     def start_all(self):
         db = SessionLocal()
@@ -262,6 +370,7 @@ class WeaponDetectionManager:
             worker.stop()
         self.workers.clear()
         self.current_positions.clear()
+        self.stream_states.clear()
         print("[WeaponManager] All camera stream workers stopped.")
 
 

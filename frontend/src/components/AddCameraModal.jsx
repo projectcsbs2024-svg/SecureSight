@@ -2,6 +2,8 @@ import { useState } from "react";
 import api from "../apiHandle/api.jsx";
 import { MapPicker } from "../components/MapPicker";
 import { motion, AnimatePresence } from "framer-motion";
+import ReactPlayer from "react-player";
+import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
 export const AddCameraModal = ({ onAdd, onClose }) => {
   const [name, setName] = useState("");
@@ -16,17 +18,6 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
     "weapon",
     "scuffle",
   ]);
-
-  const isBrowserPreviewableUrl = (value) => {
-    if (!value) return false;
-    const lower = value.toLowerCase();
-    return (
-      lower.startsWith("http://") ||
-      lower.startsWith("https://") ||
-      lower.startsWith("blob:") ||
-      lower.startsWith("/")
-    );
-  };
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
@@ -258,21 +249,39 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   <p className="mb-3 text-xs text-gray-400">
                     Any network source is accepted here, including `rtsp://`, `rtmp://`, `http://`, `https://`, and YouTube video links.
                   </p>
-                  {url && isBrowserPreviewableUrl(url) && (
+                  {url && (isNativeVideoUrl(url) || isYouTubeUrl(url)) && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       transition={{ duration: 0.3 }}
                       className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600"
                     >
-                      <video
-                        src={url}
-                        className="w-full h-full object-contain"
-                        controls
-                      />
+                      {isYouTubeUrl(url) ? (
+                        <ReactPlayer
+                          url={url}
+                          width="100%"
+                          height="100%"
+                          controls
+                          playing={false}
+                          config={{
+                            youtube: {
+                              playerVars: {
+                                modestbranding: 1,
+                                rel: 0,
+                              },
+                            },
+                          }}
+                        />
+                      ) : (
+                        <video
+                          src={url}
+                          className="w-full h-full object-contain"
+                          controls
+                        />
+                      )}
                     </motion.div>
                   )}
-                  {url && !isBrowserPreviewableUrl(url) && (
+                  {url && !isNativeVideoUrl(url) && !isYouTubeUrl(url) && (
                     <div className="w-full rounded-lg border border-dashed border-gray-600 bg-black/20 p-4 text-xs text-gray-300">
                       Browser preview is not available for this source, but the URL will still be saved and used by the backend detector.
                     </div>

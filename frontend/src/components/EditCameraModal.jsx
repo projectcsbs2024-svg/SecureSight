@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MapPicker } from "../components/MapPicker";
+import ReactPlayer from "react-player";
+import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
 export const EditCameraModal = ({ camera, onSave, onClose }) => {
   const [cameraData, setCameraData] = useState({
@@ -11,17 +13,6 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
     stream_url: "",
     detections_enabled: ["weapon"],
   });
-
-  const isBrowserPreviewableUrl = (value) => {
-    if (!value) return false;
-    const lower = value.toLowerCase();
-    return (
-      lower.startsWith("http://") ||
-      lower.startsWith("https://") ||
-      lower.startsWith("blob:") ||
-      lower.startsWith("/")
-    );
-  };
 
   // Prefill all values from backend, including map coordinates
   useEffect(() => {
@@ -159,17 +150,35 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
                 Any network source can be saved here and used for detection, including `rtsp://`, `rtmp://`, `http://`, `https://`, and YouTube video links.
               </p>
 
-              {cameraData.stream_url && isBrowserPreviewableUrl(cameraData.stream_url) && (
+              {cameraData.stream_url && (isNativeVideoUrl(cameraData.stream_url) || isYouTubeUrl(cameraData.stream_url)) && (
                 <div className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600 mb-4">
-                  <video
-                    src={cameraData.stream_url}
-                    className="w-full h-full object-contain"
-                    controls
-                  />
+                  {isYouTubeUrl(cameraData.stream_url) ? (
+                    <ReactPlayer
+                      url={cameraData.stream_url}
+                      width="100%"
+                      height="100%"
+                      controls
+                      playing={false}
+                      config={{
+                        youtube: {
+                          playerVars: {
+                            modestbranding: 1,
+                            rel: 0,
+                          },
+                        },
+                      }}
+                    />
+                  ) : (
+                    <video
+                      src={cameraData.stream_url}
+                      className="w-full h-full object-contain"
+                      controls
+                    />
+                  )}
                 </div>
               )}
 
-              {cameraData.stream_url && !isBrowserPreviewableUrl(cameraData.stream_url) && (
+              {cameraData.stream_url && !isNativeVideoUrl(cameraData.stream_url) && !isYouTubeUrl(cameraData.stream_url) && (
                 <div className="w-full rounded-lg border border-dashed border-gray-600 bg-black/20 p-4 text-xs text-gray-300 mb-4">
                   Browser preview is not available for this source, but the backend will still use it for detection.
                 </div>

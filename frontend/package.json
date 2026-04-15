@@ -19,6 +19,7 @@
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-leaflet": "^5.0.0",
+    "react-player": "^2.16.1",
     "react-router-dom": "^7.9.5"
   },
   "devDependencies": {

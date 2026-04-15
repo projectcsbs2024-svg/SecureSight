@@ -210,12 +210,40 @@ async def camera_ws_endpoint(websocket: WebSocket, camera_id: str):
 @router.get("/{camera_id}/position")
 def get_camera_position(camera_id: str):
     """
-    Returns: {"current_time_ms": <int>}
-    If the camera is a video file and backend is processing it, the value
-    will be the last position captured by the worker (cv2.CAP_PROP_POS_MSEC).
+    Returns current playback state tracked by the backend worker.
     """
+    state = weapon_manager.stream_states.get(camera_id, {})
     pos = weapon_manager.current_positions.get(camera_id, 0)
-    return {"current_time_ms": int(pos or 0)}
+    return {
+        "current_time_ms": int(state.get("current_time_ms", pos) or 0),
+        "ended": bool(state.get("ended", False)),
+        "source_kind": state.get("source_kind", "unknown"),
+        "worker_running": camera_id in weapon_manager.workers,
+    }
+
+@router.post("/{camera_id}/replay")
+def replay_camera_stream(
+    camera_id: str,
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
+    if not db_camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    enabled = db_camera.detections_enabled or []
+    if "weapon" not in enabled and "scuffle" not in enabled:
+        raise HTTPException(status_code=400, detail="No stream detection is enabled for this camera")
+
+    weapon_manager.replay_worker(db_camera.id)
+    state = weapon_manager.stream_states.get(db_camera.id, {})
+    return {
+        "message": "Replay started",
+        "camera_id": db_camera.id,
+        "current_time_ms": int(state.get("current_time_ms", 0) or 0),
+        "ended": bool(state.get("ended", False)),
+        "worker_running": db_camera.id in weapon_manager.workers,
+    }
 
 @router.get("/active_count")
 def get_current_alert_count():
