@@ -6,7 +6,7 @@ import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
 const DETECTION_LABELS = {
   weapon: "Weapon",
-  scuffle: "Strangulation",
+  scuffle: "Scuffle",
   stampede: "Stampede",
 };
 

@@ -519,7 +519,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
             : "rgba(0,255,0,0.3)";
         const label =
           a.type === "scuffle"
-            ? `strangulation${a.subtype ? ` (${a.subtype})` : ""} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim()
+            ? `scuffle${a.subtype ? ` (${a.subtype})` : ""} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim()
             : a.type === "stampede"
             ? (a.subtype && a.subtype !== "summary"
                 ? `${a.subtype}${a.confidence ? ` ${a.confidence.toFixed(2)}` : ""}`.trim()

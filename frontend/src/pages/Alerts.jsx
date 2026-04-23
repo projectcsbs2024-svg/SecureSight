@@ -19,7 +19,7 @@ import api from "../apiHandle/api";
 
 const formatDetectionType = (type, subtype) => {
   if (type === "weapon") return `Weapon-${subtype || "Unknown"}`;
-  if (type === "scuffle") return `Strangulation-${subtype || "Unknown"}`;
+  if (type === "scuffle") return `Scuffle-${subtype || "Unknown"}`;
   if (type === "stampede") return "Stampede";
   return type || "Detection";
 };

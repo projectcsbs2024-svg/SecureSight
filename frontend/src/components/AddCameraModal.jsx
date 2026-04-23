@@ -7,7 +7,7 @@ import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
 const DETECTION_LABELS = {
   weapon: "Weapon",
-  scuffle: "Strangulation",
+  scuffle: "Scuffle",
   stampede: "Stampede",
 };
 
@@ -192,7 +192,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   ))}
                 </div>
                 <p className="mt-2 text-xs text-gray-400">
-                  New cameras start with Weapon and Strangulation enabled by default.
+                  New cameras start with Weapon and Scuffle enabled by default.
                 </p>
               </div>
 

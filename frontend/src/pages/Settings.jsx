@@ -8,7 +8,7 @@ import api from "../apiHandle/api";
 
 const THRESHOLD_LABELS = {
   weapon: "Weapon",
-  scuffle: "Strangulation",
+  scuffle: "Scuffle",
   stampede: "Stampede",
 };
 
