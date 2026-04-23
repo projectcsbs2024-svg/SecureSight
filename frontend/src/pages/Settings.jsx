@@ -39,7 +39,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
         setAlertEmails(data.alert_emails || []);
         setThresholds({
           weapon: Math.round((data.weapon_threshold || 0.8) * 100),
-          scuffle: Math.round((data.scuffle_threshold || 0.7) * 100),
+          scuffle: Math.round((data.scuffle_threshold || 0.45) * 100),
           stampede: Math.round((data.stampede_threshold || 0.75) * 100),
         });
       } catch (err) {

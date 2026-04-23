@@ -14,7 +14,7 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 class SettingsRequest(BaseModel):
     alert_emails: list[str]
     weapon_threshold: float = 0.8
-    scuffle_threshold: float = 0.7
+    scuffle_threshold: float = 0.45
     stampede_threshold: float = 0.75
 
 class SettingsResponse(BaseModel):
@@ -30,7 +30,7 @@ def get_settings_safe(user=Depends(get_current_user), db: Session = Depends(get_
         return SettingsResponse(
             alert_emails=["test@example.com"],
             weapon_threshold=0.8,
-            scuffle_threshold=0.7,
+            scuffle_threshold=0.45,
             stampede_threshold=0.75
         )
     alert_emails = settings.alert_emails.split(",") if settings.alert_emails else []

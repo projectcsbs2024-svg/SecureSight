@@ -105,7 +105,7 @@ def get_user_settings(db: Session, user_id: int):
 
 def create_or_update_user_settings(db: Session, user_id: int, alert_emails: str,
                                    weapon_threshold: float = 0.8,
-                                   scuffle_threshold: float = 0.7,
+                                   scuffle_threshold: float = 0.45,
                                    stampede_threshold: float = 0.75):
     settings = get_user_settings(db, user_id)
     if not settings:

@@ -72,6 +72,13 @@ class ScuffleArtifacts:
     error: str | None = None
 
 
+@dataclass
+class ScuffleInferenceResult:
+    confidence: float
+    positive_votes: int
+    predicted_positive: bool
+
+
 def _safe_torch_load(path: str):
     try:
         return torch.load(path, map_location=DEVICE, weights_only=False)
@@ -250,6 +257,24 @@ def _persons_bbox(persons: list[np.ndarray]) -> list[float]:
     return [x1, y1, x2, y2]
 
 
+def _infer_scuffle_window(model: ChokingBiLSTM, input_tensor: torch.Tensor) -> ScuffleInferenceResult:
+    probs = []
+    with torch.no_grad():
+        for _ in range(MC_RUNS):
+            logits = model(input_tensor).squeeze(-1)
+            probs.append(float(torch.sigmoid(logits).item()))
+
+    confidence = float(np.mean(probs))
+    positive_votes = sum(1 for prob in probs if prob >= DEFAULT_THRESHOLD)
+    predicted_positive = positive_votes >= (MC_RUNS / 2)
+
+    return ScuffleInferenceResult(
+        confidence=confidence,
+        positive_votes=positive_votes,
+        predicted_positive=predicted_positive,
+    )
+
+
 def _save_scuffle_detection(
     frame,
     camera_id: str,
@@ -257,6 +282,7 @@ def _save_scuffle_detection(
     confidence: float,
     frame_time_ms: float | None,
     subtype: str = "choking",
+    positive_votes: int | None = None,
 ):
     detections_logged = []
     db = SessionLocal()
@@ -267,7 +293,7 @@ def _save_scuffle_detection(
             return detections_logged
 
         settings = db.query(UserSetting).filter(UserSetting.user_id == camera.user_id).first()
-        scuffle_threshold = settings.scuffle_threshold if settings else 0.7
+        scuffle_threshold = settings.scuffle_threshold if settings else DEFAULT_THRESHOLD
         recipients = []
         if settings and settings.alert_emails:
             recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
@@ -328,6 +354,8 @@ def _save_scuffle_detection(
                 "timestamp": timestamp.isoformat(),
                 "bbox": bbox,
                 "frame_time_ms": frame_time_ms,
+                "positive_votes": positive_votes,
+                "mc_runs": MC_RUNS,
             }
         )
         notify_detection_async(
@@ -406,14 +434,8 @@ class ScuffleSequenceDetector:
         scaled = self.scaler.transform(reshaped).reshape(1, self.window_size, self.input_dim)
         input_tensor = torch.tensor(scaled, dtype=torch.float32, device=DEVICE)
 
-        probs = []
-        with torch.no_grad():
-            for _ in range(MC_RUNS):
-                logits = self.model(input_tensor).squeeze(-1)
-                probs.append(float(torch.sigmoid(logits).item()))
-
-        confidence = float(np.mean(probs))
-        if confidence < DEFAULT_THRESHOLD:
+        inference = _infer_scuffle_window(self.model, input_tensor)
+        if not inference.predicted_positive:
             return []
 
         now = time.time()
@@ -422,4 +444,12 @@ class ScuffleSequenceDetector:
 
         self.last_logged_at = now
         bbox = _persons_bbox(persons)
-        return _save_scuffle_detection(frame, camera_id, bbox, confidence, frame_time_ms)
+        return _save_scuffle_detection(
+            frame,
+            camera_id,
+            bbox,
+            inference.confidence,
+            frame_time_ms,
+            subtype="strangulation",
+            positive_votes=inference.positive_votes,
+        )
