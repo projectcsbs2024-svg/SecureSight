@@ -1,5 +1,6 @@
 import os
 import smtplib
+import mimetypes
 from email.message import EmailMessage
 from threading import Thread
 
@@ -45,6 +46,26 @@ def _smtp_config():
     }
 
 
+def _resolve_attachment_from_image_url(image_url: str | None) -> tuple[str, bytes, str] | None:
+    if not image_url:
+        return None
+
+    normalized_path = image_url.split("?", 1)[0].lstrip("/").replace("/", os.sep)
+    absolute_path = os.path.join(BASE_DIR, normalized_path)
+    absolute_path = os.path.abspath(absolute_path)
+    static_root = os.path.abspath(os.path.join(BASE_DIR, "static"))
+
+    if os.path.commonpath([static_root, absolute_path]) != static_root or not os.path.isfile(absolute_path):
+        return None
+
+    mime_type, _ = mimetypes.guess_type(absolute_path)
+    mime_type = mime_type or "application/octet-stream"
+    maintype, subtype = mime_type.split("/", 1)
+
+    with open(absolute_path, "rb") as image_file:
+        return os.path.basename(absolute_path), image_file.read(), f"{maintype}/{subtype}"
+
+
 def email_service_ready() -> tuple[bool, str]:
     config = _smtp_config()
     if not config["enabled"]:
@@ -66,20 +87,21 @@ def send_detection_alert_email(
     confidence: float | None,
     timestamp: str,
     image_url: str | None,
-):
+) -> tuple[bool, str]:
     config = _smtp_config()
     if not recipients:
-        return
+        return False, "no recipients configured"
 
     ready, reason = email_service_ready()
     if not ready:
-        print(f"[EmailService] Skipping alert email: {reason}")
-        return
+        message = f"[EmailService] Skipping alert email: {reason}"
+        print(message)
+        return False, reason
 
     confidence_text = f"{confidence * 100:.2f}%" if confidence is not None else "N/A"
     subject_suffix = f" - {subtype}" if subtype else ""
-    public_api_base = os.getenv("PUBLIC_API_BASE_URL", "").rstrip("/")
-    full_image_url = f"{public_api_base}{image_url}" if image_url and public_api_base else image_url
+    attachment = _resolve_attachment_from_image_url(image_url)
+    attachment_status = "Attached" if attachment else "Not available"
 
     message = EmailMessage()
     message["Subject"] = f"SecureSight Alert: {detection_type.title()}{subject_suffix}"
@@ -94,10 +116,15 @@ def send_detection_alert_email(
                 f"Subtype: {subtype or 'N/A'}",
                 f"Confidence: {confidence_text}",
                 f"Timestamp (UTC): {timestamp}",
-                f"Snapshot: {full_image_url or 'Not available'}",
+                f"Snapshot Attachment: {attachment_status}",
             ]
         )
     )
+
+    if attachment:
+        filename, content, mime_type = attachment
+        maintype, subtype = mime_type.split("/", 1)
+        message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
     try:
         if config["use_ssl"]:
@@ -115,8 +142,10 @@ def send_detection_alert_email(
                     server.login(config["username"], config["password"])
                 server.send_message(message)
         print(f"[EmailService] Alert email sent to {len(recipients)} recipient(s)")
+        return True, "sent"
     except Exception as exc:
         print(f"[EmailService] Failed to send alert email: {exc}")
+        return False, str(exc)
 
 
 def notify_detection_async(
@@ -128,8 +157,11 @@ def notify_detection_async(
     timestamp: str,
     image_url: str | None,
 ):
-    Thread(
-        target=send_detection_alert_email,
-        args=(recipients, camera_name, detection_type, subtype, confidence, timestamp, image_url),
-        daemon=True,
-    ).start()
+    def _send_in_background():
+        success, error = send_detection_alert_email(
+            recipients, camera_name, detection_type, subtype, confidence, timestamp, image_url
+        )
+        if not success:
+            print(f"[EmailService] Background alert email failed: {error}")
+
+    Thread(target=_send_in_background, daemon=True).start()

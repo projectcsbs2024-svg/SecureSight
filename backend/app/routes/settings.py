@@ -85,7 +85,7 @@ def send_test_email(user=Depends(get_current_user), db: Session = Depends(get_db
     if not ready:
         raise HTTPException(status_code=400, detail=f"Email service not configured: {reason}")
 
-    send_detection_alert_email(
+    success, error = send_detection_alert_email(
         recipients=recipients,
         camera_name="SecureSight Test Camera",
         detection_type="test-alert",
@@ -94,4 +94,7 @@ def send_test_email(user=Depends(get_current_user), db: Session = Depends(get_db
         timestamp=datetime.now(timezone.utc).isoformat(),
         image_url=None,
     )
+    if not success:
+        raise HTTPException(status_code=400, detail=f"Failed to send email: {error}")
+
     return {"message": f"Test email sent to {len(recipients)} recipient(s)"}
