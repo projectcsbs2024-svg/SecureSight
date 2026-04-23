@@ -34,6 +34,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         scuffle: detections.includes("scuffle"),
         stampede: detections.includes("stampede"),
       },
+      stampede_person_limit: cam.stampede_person_limit,
       detections_enabled: detections,
       rawCamera: cam,
     };
@@ -69,6 +70,9 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         location: updatedCamera.location,
         stream_url: updatedCamera.stream_url?.trim() || null,
         detections_enabled: detections,
+        stampede_person_limit: detections.includes("stampede")
+          ? updatedCamera.stampede_person_limit
+          : null,
       };
 
       const res = await api.put(`/cameras/${updatedCamera.id}`, body);
@@ -168,6 +172,12 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
                       <span>{DETECTION_LABELS.weapon}: <b className={cam.detection.weapon ? "text-green-600" : "text-red-500"}>{cam.detection.weapon ? "Yes" : "No"}</b></span><br />
                       <span>{DETECTION_LABELS.scuffle}: <b className={cam.detection.scuffle ? "text-green-600" : "text-red-500"}>{cam.detection.scuffle ? "Yes" : "No"}</b></span><br />
                       <span>{DETECTION_LABELS.stampede}: <b className={cam.detection.stampede ? "text-green-600" : "text-red-500"}>{cam.detection.stampede ? "Yes" : "No"}</b></span>
+                      {cam.detection.stampede && cam.stampede_person_limit ? (
+                        <>
+                          <br />
+                          <span>Allowed Persons: <b className="text-gray-800">{cam.stampede_person_limit}</b></span>
+                        </>
+                      ) : null}
                     </td>
                     <td className="px-4 py-3 flex gap-2">
                       <button

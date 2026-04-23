@@ -24,6 +24,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
     "weapon",
     "scuffle",
   ]);
+  const [stampedePersonLimit, setStampedePersonLimit] = useState("");
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
@@ -75,6 +76,14 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
       return;
     }
 
+    if (detectionsEnabled.includes("stampede")) {
+      const parsedLimit = Number(stampedePersonLimit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        alert("Enter a valid allowed person count for stampede detection");
+        return;
+      }
+    }
+
     const newCamera = {
       name,
       latitude,
@@ -82,6 +91,9 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
       location,
       stream_url: streamUrl,
       detections_enabled: detectionsEnabled,
+      stampede_person_limit: detectionsEnabled.includes("stampede")
+        ? Number(stampedePersonLimit)
+        : null,
     };
 
     try {
@@ -183,6 +195,26 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   New cameras start with Weapon and Strangulation enabled by default.
                 </p>
               </div>
+
+              {detectionsEnabled.includes("stampede") && (
+                <div className="mb-4">
+                  <label className="block text-gray-200 font-semibold mb-2 text-sm">
+                    Allowed persons for stampede detection
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={stampedePersonLimit}
+                    onChange={(e) => setStampedePersonLimit(e.target.value)}
+                    placeholder="Enter allowed persons"
+                    className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <p className="mt-2 text-xs text-gray-400">
+                    An alert is created when the detected people count goes above this limit.
+                  </p>
+                </div>
+              )}
 
               <div className="flex justify-center space-x-2 mb-3">
                 <button
@@ -312,7 +344,10 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   latitude === null ||
                   longitude === null ||
                   (mode === "url" && !url.trim()) ||
-                  detectionsEnabled.length === 0
+                  detectionsEnabled.length === 0 ||
+                  (detectionsEnabled.includes("stampede") &&
+                    (!Number.isInteger(Number(stampedePersonLimit)) ||
+                      Number(stampedePersonLimit) <= 0))
                 }
                 className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm transition-all ${
                   uploading ||
@@ -320,7 +355,10 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   latitude === null ||
                   longitude === null ||
                   (mode === "url" && !url.trim()) ||
-                  detectionsEnabled.length === 0
+                  detectionsEnabled.length === 0 ||
+                  (detectionsEnabled.includes("stampede") &&
+                    (!Number.isInteger(Number(stampedePersonLimit)) ||
+                      Number(stampedePersonLimit) <= 0))
                     ? "bg-gray-500 cursor-not-allowed"
                     : "bg-primary hover:bg-teal-600"
                 }`}

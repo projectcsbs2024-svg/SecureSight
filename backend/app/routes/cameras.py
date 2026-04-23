@@ -50,6 +50,7 @@ class CameraCreate(BaseModel):
     location: Optional[str] = None
     stream_url: Optional[str] = None
     detections_enabled: Optional[List[str]] = ["weapon", "scuffle"]
+    stampede_person_limit: Optional[int] = None
 
 class CameraUpdate(BaseModel):
     name: Optional[str] = None
@@ -59,6 +60,17 @@ class CameraUpdate(BaseModel):
     status: Optional[str] = None
     stream_url: Optional[str] = None
     detections_enabled: Optional[List[str]] = None
+    stampede_person_limit: Optional[int] = None
+
+
+def validate_stampede_settings(detections_enabled: Optional[List[str]], stampede_person_limit: Optional[int]):
+    normalized = normalize_detections_enabled(detections_enabled)
+    if "stampede" in normalized:
+        if stampede_person_limit is None or stampede_person_limit <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Stampede person limit is required and must be greater than 0 when stampede detection is enabled",
+            )
 
 # ----------------------
 # Upload video endpoint
@@ -79,6 +91,9 @@ def add_camera(
     user=Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    normalized_detections = normalize_detections_enabled(camera.detections_enabled) or ["weapon", "scuffle"]
+    validate_stampede_settings(normalized_detections, camera.stampede_person_limit)
+
     new_camera = Camera(
         id=str(uuid.uuid4()),
         name=camera.name,
@@ -87,7 +102,8 @@ def add_camera(
         location=camera.location,
         stream_url=camera.stream_url,
         user_id=user.id,
-        detections_enabled=normalize_detections_enabled(camera.detections_enabled) or ["weapon", "scuffle"]
+        detections_enabled=normalized_detections,
+        stampede_person_limit=camera.stampede_person_limit if "stampede" in normalized_detections else None,
     )
 
     db.add(new_camera)
@@ -95,7 +111,7 @@ def add_camera(
     db.refresh(new_camera)
 
     # Start stream detection if any realtime detector is enabled
-    if any(det in (new_camera.detections_enabled or []) for det in ["weapon", "scuffle"]):
+    if any(det in (new_camera.detections_enabled or []) for det in ["weapon", "scuffle", "stampede"]):
         weapon_manager.start_worker(new_camera.id)
 
     return new_camera
@@ -122,18 +138,35 @@ def update_camera(
     if not db_camera:
         raise HTTPException(status_code=404, detail="Camera not found")
 
+    next_detections = camera.detections_enabled
+    if next_detections is None:
+        next_detections = db_camera.detections_enabled or []
+    normalized_detections = normalize_detections_enabled(next_detections)
+
+    next_stampede_limit = (
+        camera.stampede_person_limit
+        if camera.stampede_person_limit is not None
+        else db_camera.stampede_person_limit
+    )
+    validate_stampede_settings(normalized_detections, next_stampede_limit)
+
     for field in ["name", "latitude", "longitude", "location", "status", "stream_url", "detections_enabled"]:
         value = getattr(camera, field)
         if value is not None:
             if field == "detections_enabled":
-                value = normalize_detections_enabled(value)
+                value = normalized_detections
             setattr(db_camera, field, value)
+
+    if camera.stampede_person_limit is not None:
+        db_camera.stampede_person_limit = camera.stampede_person_limit
+    if "stampede" not in (db_camera.detections_enabled or []):
+        db_camera.stampede_person_limit = None
 
     db.commit()
     db.refresh(db_camera)
 
     # Start/stop stream worker based on enabled realtime detections
-    if any(det in (db_camera.detections_enabled or []) for det in ["weapon", "scuffle"]):
+    if any(det in (db_camera.detections_enabled or []) for det in ["weapon", "scuffle", "stampede"]):
         # restart to pick up any stream_url change
         weapon_manager.stop_worker(db_camera.id)  # stop if already running
         weapon_manager.start_worker(db_camera.id)
@@ -173,7 +206,18 @@ def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)
 
     output = StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Name", "Latitude", "Longitude", "Location", "Stream URL", "Detections Enabled", "Status", "Created At"])
+    writer.writerow([
+        "ID",
+        "Name",
+        "Latitude",
+        "Longitude",
+        "Location",
+        "Stream URL",
+        "Detections Enabled",
+        "Stampede Person Limit",
+        "Status",
+        "Created At",
+    ])
 
     for cam in cameras:
         writer.writerow([
@@ -184,6 +228,7 @@ def export_cameras(user=Depends(get_current_user), db: Session = Depends(get_db)
             cam.location,
             cam.stream_url,
             ",".join(cam.detections_enabled or []),
+            cam.stampede_person_limit,
             cam.status,
             cam.created_at.strftime("%Y-%m-%d %H:%M:%S") if cam.created_at else ""
         ])
@@ -251,7 +296,7 @@ def replay_camera_stream(
         raise HTTPException(status_code=404, detail="Camera not found")
 
     enabled = db_camera.detections_enabled or []
-    if "weapon" not in enabled and "scuffle" not in enabled:
+    if not any(det in enabled for det in ["weapon", "scuffle", "stampede"]):
         raise HTTPException(status_code=400, detail="No stream detection is enabled for this camera")
 
     weapon_manager.replay_worker(db_camera.id)

@@ -52,7 +52,7 @@ def save_detection_image(file: UploadFile, camera_id: str) -> str:
 async def upload_detection(
     camera_id: str = Form(...),
     detection_type: str = Form(...),
-    confidence: float = Form(...),
+    confidence: float | None = Form(None),
     subtype: str = Form(None),
     people_count: int = Form(0),
     status: str = Form("Active"),
@@ -200,6 +200,7 @@ def get_detection_analytics(
             "type": det.type,
             "subtype": det.subtype,
             "confidence": det.confidence,
+            "people_count": det.people_count,
             "status": det.status,
             "timestamp": det.timestamp,
         }

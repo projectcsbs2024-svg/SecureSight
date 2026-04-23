@@ -90,8 +90,10 @@ export default function DetectionPreview({
 
             <div className="space-y-2">
               <p>
-                <strong className="text-gray-800">Confidence:</strong>{" "}
-                <span className="text-green-600">{alert.confidence}%</span>
+                <strong className="text-gray-800">
+                  {alert.rawType === "stampede" ? "People Count:" : "Confidence:"}
+                </strong>{" "}
+                <span className="text-green-600">{alert.value}</span>
               </p>
               <p>
                 <strong className="text-gray-800">Status:</strong>{" "}

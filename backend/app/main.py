@@ -5,9 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.routes import auth, cameras, detections, settings
 from app.services.weapon_worker import weapon_manager
-from app.database import get_db
+from app.database import get_db, engine, Base, SessionLocal
 from app.models import Camera
 from sqlalchemy.orm import Session
+from sqlalchemy import inspect, text
 import asyncio
 from app.services.ws_manager import ws_manager
 from app.services.dashboard_ws import dashboard_ws_manager
@@ -40,6 +41,19 @@ app.include_router(cameras.router)
 app.include_router(detections.router)
 app.include_router(settings.router)
 
+
+def ensure_database_schema():
+    Base.metadata.create_all(bind=engine)
+
+    inspector = inspect(engine)
+    if not inspector.has_table("cameras"):
+        return
+
+    camera_columns = {column["name"] for column in inspector.get_columns("cameras")}
+    if "stampede_person_limit" not in camera_columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE cameras ADD COLUMN stampede_person_limit INTEGER"))
+
 # ----------------------
 # WebSocket: Dashboard Updates
 # ----------------------
@@ -71,14 +85,15 @@ async def startup_event():
     except Exception as e:
         print(f"[Main] Could not set ws_manager loop: {e}")
 
-    db: Session = next(get_db())
+    ensure_database_schema()
+    db: Session = SessionLocal()
     try:
         # Load all cameras from DB
         db_cameras = db.query(Camera).all()
         cameras_to_run = [
             cam for cam in db_cameras
             if cam.detections_enabled
-            and ("weapon" in cam.detections_enabled or "scuffle" in cam.detections_enabled)
+            and any(det in cam.detections_enabled for det in ["weapon", "scuffle", "stampede"])
         ]
 
         for cam in cameras_to_run:
@@ -87,6 +102,8 @@ async def startup_event():
         print(f"Weapon detection workers started for {len(cameras_to_run)} cameras.")
     except Exception as e:
         print(f"Error starting weapon detection workers: {e}")
+    finally:
+        db.close()
 
 
 # ----------------------

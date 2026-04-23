@@ -220,7 +220,7 @@ export default function Analytics({ sidebarWidth = 60, navbarHeight = 64 }) {
                     <tr className="text-left text-gray-400 border-b border-gray-600">
                       <th className="py-2 pr-4">Camera</th>
                       <th className="py-2 pr-4">Type</th>
-                      <th className="py-2 pr-4">Confidence</th>
+                      <th className="py-2 pr-4">Value</th>
                       <th className="py-2 pr-4">Status</th>
                       <th className="py-2">Time</th>
                     </tr>
@@ -234,7 +234,11 @@ export default function Analytics({ sidebarWidth = 60, navbarHeight = 64 }) {
                           {alert.subtype ? ` (${alert.subtype})` : ""}
                         </td>
                         <td className="py-3 pr-4">
-                          {alert.confidence != null
+                          {alert.type === "stampede"
+                            ? alert.people_count != null
+                              ? `${alert.people_count} people`
+                              : "N/A"
+                            : alert.confidence != null
                             ? `${(alert.confidence * 100).toFixed(2)}%`
                             : "N/A"}
                         </td>

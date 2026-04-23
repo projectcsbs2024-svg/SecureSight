@@ -5,6 +5,7 @@ from threading import Thread
 from app.database import SessionLocal
 from app.models import Camera
 from app.services.scuffle_detection import ScuffleSequenceDetector
+from app.services.stampede_detection import StampedeDetector
 from app.services.weapon_detection import detect_weapons_from_frame
 import time
 import asyncio
@@ -37,9 +38,16 @@ class CameraStreamWorker:
         enabled_detectors = _normalize_enabled_detectors(camera.detections_enabled)
         self.weapon_enabled = "weapon" in enabled_detectors
         self.scuffle_enabled = "scuffle" in enabled_detectors
+        self.stampede_enabled = "stampede" in enabled_detectors
         self.scuffle_detector = ScuffleSequenceDetector() if self.scuffle_enabled else None
+        self.stampede_detector = StampedeDetector() if self.stampede_enabled else None
         if self.scuffle_detector and not self.scuffle_detector.ready and self.scuffle_detector.error:
             print(f"[WeaponWorker] Scuffle detector unavailable for camera {camera.id}: {self.scuffle_detector.error}")
+        if self.stampede_detector and not self.stampede_detector.ready:
+            print(
+                f"[WeaponWorker] Stampede detector unavailable for camera {camera.id}: "
+                f"{self.stampede_detector.error or 'unknown error'}"
+            )
 
         # initial skip config
         self.frame_skip = 1
@@ -48,6 +56,8 @@ class CameraStreamWorker:
         self.frame_skip_target = 80  # desired processing time (ms per frame)
         self.last_detection_time = 0
         self.last_payload_had_detections = False
+        self._playback_wall_start = None
+        self._playback_media_start_ms = None
 
     def start(self):
         if not self.running:
@@ -124,6 +134,7 @@ class CameraStreamWorker:
                 try:
                     frame_time_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
                     if is_seekable_media:
+                        self._pace_seekable_media(frame_time_ms)
                         self.manager.mark_stream_state(
                             self.camera.id,
                             current_time_ms=frame_time_ms or 0,
@@ -149,6 +160,8 @@ class CameraStreamWorker:
                         detections.extend(detect_weapons_from_frame(frame, self.camera.id, frame_time_ms))
                     if self.scuffle_detector:
                         detections.extend(self.scuffle_detector.process_frame(frame, self.camera.id, frame_time_ms))
+                    if self.stampede_detector:
+                        detections.extend(self.stampede_detector.process_frame(frame, self.camera.id, frame_time_ms))
                     processing_ms = int((time.time() - start) * 1000)
 
                     # update moving average
@@ -197,6 +210,22 @@ class CameraStreamWorker:
             db.close()
             self.running = False
             self.manager.worker_finished(self.camera.id)
+
+    def _pace_seekable_media(self, frame_time_ms: float | None):
+        if frame_time_ms is None or frame_time_ms < 0:
+            return
+
+        now = time.perf_counter()
+        if self._playback_wall_start is None or self._playback_media_start_ms is None:
+            self._playback_wall_start = now
+            self._playback_media_start_ms = float(frame_time_ms)
+            return
+
+        target_elapsed = max(0.0, (float(frame_time_ms) - self._playback_media_start_ms) / 1000.0)
+        actual_elapsed = max(0.0, now - self._playback_wall_start)
+        sleep_for = target_elapsed - actual_elapsed
+        if sleep_for > 0.003:
+            time.sleep(sleep_for)
 
     def _read_current_frame(self, cap, is_seekable_media: bool):
         if is_seekable_media:
@@ -374,7 +403,7 @@ class WeaponDetectionManager:
             return
 
         enabled_detectors = _normalize_enabled_detectors(camera.detections_enabled)
-        if "weapon" not in enabled_detectors and "scuffle" not in enabled_detectors:
+        if not any(det in enabled_detectors for det in ["weapon", "scuffle", "stampede"]):
             print(f"[WeaponManager] No stream detection enabled for camera {camera_id}. Skipping.")
             return
 
@@ -406,7 +435,7 @@ class WeaponDetectionManager:
 
         for cam in cameras:
             enabled_detectors = _normalize_enabled_detectors(cam.detections_enabled)
-            if cam.stream_url and ("weapon" in enabled_detectors or "scuffle" in enabled_detectors):
+            if cam.stream_url and any(det in enabled_detectors for det in ["weapon", "scuffle", "stampede"]):
                 self.start_worker(cam.id)
 
         print(f"[WeaponManager] Started {len(self.workers)} camera stream workers.")

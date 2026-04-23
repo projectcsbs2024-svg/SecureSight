@@ -24,6 +24,13 @@ const formatDetectionType = (type, subtype) => {
   return type || "Detection";
 };
 
+const formatAlertValue = (d) => {
+  if (d.type === "stampede") {
+    return d.people_count != null ? `${d.people_count} people` : "N/A";
+  }
+  return d.confidence != null ? `${(d.confidence * 100).toFixed(2)}%` : "N/A";
+};
+
 export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -59,7 +66,9 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
           id: d.id,
           camera: d.camera_name || d.camera_id || "Unknown Camera",
           type: formatDetectionType(d.type, d.subtype),
-          confidence: d.confidence ? (d.confidence * 100).toFixed(2) : "N/A",
+          value: formatAlertValue(d),
+          peopleCount: d.people_count,
+          rawType: d.type,
           timestamp: d.timestamp,
           time: d.timestamp
             ? new Date(d.timestamp + "Z").toLocaleString()
@@ -80,7 +89,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
           const changed =
             old.status !== a.status ||
             old.type !== a.type ||
-            old.confidence !== a.confidence ||
+            old.value !== a.value ||
             old.image !== a.image ||
             old.time !== a.time;
           return changed ? a : old;
@@ -285,11 +294,11 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
               onClick={() => {
                 if (!filteredAlerts.length) return;
 
-                const headers = ["Camera", "Type", "Confidence", "Time", "Status"];
+                const headers = ["Camera", "Type", "Value", "Time", "Status"];
                 const rows = filteredAlerts.map(a => [
                   a.camera,
                   a.type,
-                  a.confidence,
+                  a.value,
                   a.time,
                   a.status
                 ]);
@@ -331,7 +340,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
                   <tr>
                     <th className="px-4 py-3 text-left font-semibold">Camera</th>
                     <th className="px-4 py-3 text-left font-semibold">Type</th>
-                    <th className="px-4 py-3 text-left font-semibold">Confidence</th>
+                    <th className="px-4 py-3 text-left font-semibold">Value</th>
                     <th className="px-4 py-3 text-left font-semibold">Time</th>
                     <th className="px-4 py-3 text-left font-semibold">Status</th>
                     <th className="px-4 py-3 text-center font-semibold">Action</th>
@@ -351,7 +360,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
                         >
                           <td className="px-4 py-3">{alert.camera}</td>
                           <td className="px-4 py-3">{alert.type}</td>
-                          <td className="px-4 py-3">{alert.confidence}%</td>
+                          <td className="px-4 py-3">{alert.value}</td>
                           <td className="px-4 py-3">{alert.time}</td>
                           <td className="px-4 py-3">
                             <span

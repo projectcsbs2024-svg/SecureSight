@@ -197,21 +197,58 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
               onNewDetection(cameraId, msg.detections);
             }
 
-            const nextAnnotations = msg.detections.map((det) => ({
-              id: det.detection_id ?? `${timestamp}_${Math.random()}`,
-              bbox: det.bbox || [0, 0, 0, 0],
-              type: det.type || "weapon",
-              subtype: det.subtype,
-              confidence: det.confidence,
-              frameTime:
+            const nextAnnotations = msg.detections.flatMap((det) => {
+              const frameTime =
                 det.frame_time_ms != null
                   ? det.frame_time_ms / 1000
                   : msg.frame_time_ms != null
                   ? msg.frame_time_ms / 1000
-                  : null,
-              receivedAt: timestamp,
-              eventId,
-            }));
+                  : null;
+
+              if (det.type === "stampede" && Array.isArray(det.overlay_boxes) && det.overlay_boxes.length > 0) {
+                const personAnnotations = det.overlay_boxes.map((box, index) => ({
+                  id: `${det.detection_id ?? timestamp}_${index}`,
+                  bbox: box.bbox || [0, 0, 0, 0],
+                  type: det.type || "stampede",
+                  subtype: box.label || "person",
+                  confidence: box.confidence,
+                  people_count: det.people_count,
+                  allowed_people: det.allowed_people,
+                  frameTime,
+                  receivedAt: timestamp,
+                  eventId,
+                }));
+
+                personAnnotations.push({
+                  id: `${det.detection_id ?? timestamp}_summary`,
+                  bbox: det.bbox || [0, 0, 0, 0],
+                  type: det.type || "stampede",
+                  subtype: "summary",
+                  confidence: det.confidence,
+                  people_count: det.people_count,
+                  allowed_people: det.allowed_people,
+                  frameTime,
+                  receivedAt: timestamp,
+                  eventId,
+                });
+                return personAnnotations;
+              }
+
+              return [
+                {
+                  id: det.detection_id ?? `${timestamp}_${Math.random()}`,
+                  bbox: det.bbox || [0, 0, 0, 0],
+                  type: det.type || "weapon",
+                  subtype: det.subtype,
+                  confidence: det.confidence,
+                  people_count: det.people_count,
+                  allowed_people: det.allowed_people,
+                  frameTime,
+                  receivedAt: timestamp,
+                  eventId,
+                },
+              ];
+            });
 
             setAnnotations((prev) => {
               const replayable = isReplayableSourceKind(msg.source_kind || backendClockRef.current.sourceKind);
@@ -463,16 +500,30 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
         const borderColor =
           a.type === "scuffle"
             ? "rgba(255,165,0,0.95)"
+            : a.type === "stampede"
+            ? "rgba(255,0,0,0.95)"
             : a.subtype === "knife"
             ? "rgba(255,0,0,0.9)"
             : "rgba(0,255,0,0.9)";
         const fillColor =
-          a.type === "scuffle" ? "rgba(255,165,0,0.10)" : "rgba(0,255,0,0.05)";
+          a.type === "scuffle"
+            ? "rgba(255,165,0,0.10)"
+            : a.type === "stampede"
+            ? "rgba(255,0,0,0.08)"
+            : "rgba(0,255,0,0.05)";
         const glowColor =
-          a.type === "scuffle" ? "rgba(255,165,0,0.35)" : "rgba(0,255,0,0.3)";
+          a.type === "scuffle"
+            ? "rgba(255,165,0,0.35)"
+            : a.type === "stampede"
+            ? "rgba(255,0,0,0.35)"
+            : "rgba(0,255,0,0.3)";
         const label =
           a.type === "scuffle"
             ? `strangulation${a.subtype ? ` (${a.subtype})` : ""} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim()
+            : a.type === "stampede"
+            ? (a.subtype && a.subtype !== "summary"
+                ? `${a.subtype}${a.confidence ? ` ${a.confidence.toFixed(2)}` : ""}`.trim()
+                : `stampede ${a.people_count ?? 0}/${a.allowed_people ?? "?"}`.trim())
             : `${a.subtype ?? "weapon"} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim();
 
         return (

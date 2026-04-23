@@ -18,6 +18,7 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
     location: "",
     stream_url: "",
     detections_enabled: ["weapon"],
+    stampede_person_limit: "",
   });
 
   // Prefill all values from backend, including map coordinates
@@ -37,6 +38,8 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
         location: camera.location || "",
         stream_url: camera.stream_url || "",
         detections_enabled: detectionsArray.length ? detectionsArray : ["weapon"],
+        stampede_person_limit:
+          camera.stampede_person_limit != null ? String(camera.stampede_person_limit) : "",
       });
     }
   }, [camera]);
@@ -61,7 +64,21 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
       return;
     }
 
-    onSave({ id: camera.id, ...cameraData });
+    if (cameraData.detections_enabled.includes("stampede")) {
+      const parsedLimit = Number(cameraData.stampede_person_limit);
+      if (!Number.isInteger(parsedLimit) || parsedLimit <= 0) {
+        alert("Enter a valid allowed person count for stampede detection");
+        return;
+      }
+    }
+
+    onSave({
+      id: camera.id,
+      ...cameraData,
+      stampede_person_limit: cameraData.detections_enabled.includes("stampede")
+        ? Number(cameraData.stampede_person_limit)
+        : null,
+    });
     onClose();
   };
 
@@ -209,6 +226,28 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
                   </label>
                 ))}
               </div>
+
+              {cameraData.detections_enabled.includes("stampede") && (
+                <div className="mb-4">
+                  <label className="block text-gray-200 font-semibold mb-2 text-sm">
+                    Allowed persons for stampede detection
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={cameraData.stampede_person_limit}
+                    onChange={(e) =>
+                      setCameraData((prev) => ({
+                        ...prev,
+                        stampede_person_limit: e.target.value,
+                      }))
+                    }
+                    placeholder="Enter allowed persons"
+                    className="w-full bg-gray-700 text-gray-200 p-2 rounded-lg text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end space-x-2 mt-3">

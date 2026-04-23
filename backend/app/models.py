@@ -44,6 +44,7 @@ class Camera(Base):
     stream_url = Column(String, nullable=True)
     status = Column(String, default="online")  # e.g., 'online', 'offline'
     detections_enabled = Column(JSON, default=["weapon", "scuffle", "stampede"])
+    stampede_person_limit = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, ForeignKey("users.id"))
 
