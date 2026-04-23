@@ -1,12 +1,16 @@
-// src/components/CameraFeed.jsx
 import { useEffect, useRef, useState } from "react";
 import ReactPlayer from "react-player";
+
 import api from "../apiHandle/api.jsx";
 import {
   isNativeVideoUrl,
   isReplayableSourceKind,
   isYouTubeUrl,
 } from "../utils/streamSource";
+
+const REPLAY_SYNC_POLL_MS = 800;
+const GENERAL_SYNC_POLL_MS = 4000;
+const MAX_REPLAY_BUFFER = 140;
 
 export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetection }) => {
   const containerRef = useRef(null);
@@ -17,13 +21,22 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
   const reconAttemptRef = useRef(0);
   const playbackStartedRef = useRef(false);
   const lastSyncTargetRef = useRef(0);
-  const processingSamples = useRef([]);
+  const latestEventIdRef = useRef(0);
+  const processingSamplesRef = useRef([]);
+  const backendClockRef = useRef({
+    currentTimeMs: 0,
+    observedAtMs: 0,
+    workerRunning: false,
+    ended: false,
+    sourceKind: "unknown",
+  });
 
   const [annotations, setAnnotations] = useState([]);
   const [connected, setConnected] = useState(false);
   const [bufferDelay, setBufferDelay] = useState(0.5);
   const [backendState, setBackendState] = useState({
     current_time_ms: 0,
+    observed_at_ms: 0,
     ended: false,
     source_kind: "unknown",
     worker_running: false,
@@ -37,6 +50,16 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
   const hasPreview = isYouTube || isNativeVideo;
   const isReplayable = isReplayableSourceKind(backendState.source_kind);
   const isStreamFinished = backendState.ended;
+
+  const getCurrentPlayerTime = () => {
+    if (isYouTube) {
+      return reactPlayerRef.current?.getCurrentTime?.() || 0;
+    }
+    if (isNativeVideo) {
+      return videoRef.current?.currentTime || 0;
+    }
+    return playerCurrentTime || 0;
+  };
 
   const seekPlayer = (seconds) => {
     if (!Number.isFinite(seconds) || seconds < 0) return;
@@ -55,33 +78,58 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
     }
   };
 
+  const getEstimatedBackendSeconds = () => {
+    const snapshot = backendClockRef.current;
+    const baseSeconds = (snapshot.currentTimeMs || 0) / 1000;
+
+    if (!isReplayableSourceKind(snapshot.sourceKind) || snapshot.ended || !snapshot.workerRunning) {
+      return baseSeconds;
+    }
+
+    const elapsedSeconds = Math.max(0, Date.now() - (snapshot.observedAtMs || 0)) / 1000;
+    return baseSeconds + elapsedSeconds;
+  };
+
+  const applyBackendSnapshot = (data = {}) => {
+    const nextState = {
+      current_time_ms: data.current_time_ms || 0,
+      observed_at_ms: data.observed_at_ms || Date.now(),
+      ended: Boolean(data.ended),
+      source_kind: data.source_kind || "unknown",
+      worker_running: Boolean(data.worker_running),
+    };
+
+    backendClockRef.current = {
+      currentTimeMs: nextState.current_time_ms,
+      observedAtMs: nextState.observed_at_ms,
+      workerRunning: nextState.worker_running,
+      ended: nextState.ended,
+      sourceKind: nextState.source_kind,
+    };
+
+    setBackendState(nextState);
+    return nextState;
+  };
+
   const syncFromBackend = async () => {
     try {
       const res = await api.get(`/cameras/${cameraId}/position`);
-      const data = res.data || {};
-      setBackendState({
-        current_time_ms: data.current_time_ms || 0,
-        ended: Boolean(data.ended),
-        source_kind: data.source_kind || "unknown",
-        worker_running: Boolean(data.worker_running),
-      });
+      const nextState = applyBackendSnapshot(res.data || {});
+      if (!isReplayableSourceKind(nextState.source_kind)) return;
 
-      if (!isReplayableSourceKind(data.source_kind)) return;
-
-      const backendSeconds = (data.current_time_ms || 0) / 1000;
-      if (data.ended) {
+      const backendSeconds = getEstimatedBackendSeconds();
+      if (nextState.ended) {
         setPlayerCurrentTime(backendSeconds);
         return;
       }
 
-      const current = isYouTube
-        ? reactPlayerRef.current?.getCurrentTime?.() || playerCurrentTime || 0
-        : videoRef.current?.currentTime || playerCurrentTime || 0;
+      const current = getCurrentPlayerTime();
       const drift = backendSeconds - current;
+      const seekLead = Math.max(0.08, Math.min(0.32, bufferDelay * 0.3));
 
-      if (backendSeconds > 0.5 && drift > 5) {
-        const target = Math.max(0, backendSeconds - 1.5);
-        if (Math.abs(target - lastSyncTargetRef.current) > 1) {
+      if (backendSeconds > 0.2 && Math.abs(drift) > 1.1) {
+        const target = Math.max(0, backendSeconds - seekLead);
+        if (Math.abs(target - lastSyncTargetRef.current) > 0.35) {
           seekPlayer(target);
           lastSyncTargetRef.current = target;
           setPlayerCurrentTime(target);
@@ -116,33 +164,70 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
         ws.onmessage = (ev) => {
           try {
             const msg = JSON.parse(ev.data);
+            const eventId = Number(msg.event_id || 0);
+            if (eventId && eventId < latestEventIdRef.current) return;
+            if (eventId) latestEventIdRef.current = eventId;
+
+            if (msg.source_kind) {
+              backendClockRef.current = {
+                ...backendClockRef.current,
+                sourceKind: msg.source_kind,
+              };
+              setBackendState((prev) => ({
+                ...prev,
+                source_kind: msg.source_kind,
+              }));
+            }
 
             if (msg.processing_ms != null) {
-              processingSamples.current.push(msg.processing_ms);
-              if (processingSamples.current.length > 12) processingSamples.current.shift();
+              processingSamplesRef.current.push(msg.processing_ms);
+              if (processingSamplesRef.current.length > 12) {
+                processingSamplesRef.current.shift();
+              }
               const avg =
-                processingSamples.current.reduce((a, b) => a + b, 0) /
-                processingSamples.current.length;
-              setBufferDelay(Math.max(0.2, avg / 1000 + 0.25));
+                processingSamplesRef.current.reduce((sum, sample) => sum + sample, 0) /
+                processingSamplesRef.current.length;
+              setBufferDelay(Math.max(0.2, avg / 1000 + 0.22));
             }
 
-            if (Array.isArray(msg.detections) && msg.detections.length > 0) {
-              const timestamp = Date.now();
-              if (onNewDetection) onNewDetection(cameraId, msg.detections);
+            if (!Array.isArray(msg.detections)) return;
 
-              setAnnotations((prev) => [
-                ...prev,
-                ...msg.detections.map((det) => ({
-                  id: det.detection_id ?? `${timestamp}_${Math.random()}`,
-                  bbox: det.bbox || [0, 0, 0, 0],
-                  type: det.type || "weapon",
-                  subtype: det.subtype,
-                  confidence: det.confidence,
-                  frameTime: det.frame_time_ms ? det.frame_time_ms / 1000 : null,
-                  receivedAt: timestamp,
-                })),
-              ]);
+            const timestamp = Date.now();
+            if (msg.detections.length > 0 && onNewDetection) {
+              onNewDetection(cameraId, msg.detections);
             }
+
+            const nextAnnotations = msg.detections.map((det) => ({
+              id: det.detection_id ?? `${timestamp}_${Math.random()}`,
+              bbox: det.bbox || [0, 0, 0, 0],
+              type: det.type || "weapon",
+              subtype: det.subtype,
+              confidence: det.confidence,
+              frameTime:
+                det.frame_time_ms != null
+                  ? det.frame_time_ms / 1000
+                  : msg.frame_time_ms != null
+                  ? msg.frame_time_ms / 1000
+                  : null,
+              receivedAt: timestamp,
+              eventId,
+            }));
+
+            setAnnotations((prev) => {
+              const replayable = isReplayableSourceKind(msg.source_kind || backendClockRef.current.sourceKind);
+              if (!replayable) {
+                return nextAnnotations;
+              }
+
+              const merged = [...prev, ...nextAnnotations];
+              merged.sort((a, b) => {
+                const aTime = a.frameTime ?? 0;
+                const bTime = b.frameTime ?? 0;
+                if (aTime !== bTime) return aTime - bTime;
+                return (a.eventId || 0) - (b.eventId || 0);
+              });
+              return merged.slice(-MAX_REPLAY_BUFFER);
+            });
           } catch (e) {
             console.error("WS message parse error:", e);
           }
@@ -185,20 +270,50 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
   useEffect(() => {
     playbackStartedRef.current = false;
     lastSyncTargetRef.current = 0;
+    latestEventIdRef.current = 0;
     setPlayerCurrentTime(0);
+    setAnnotations([]);
+    backendClockRef.current = {
+      currentTimeMs: 0,
+      observedAtMs: Date.now(),
+      workerRunning: false,
+      ended: false,
+      sourceKind: "unknown",
+    };
+
     syncFromBackend();
-    const interval = setInterval(syncFromBackend, 4000);
-    return () => clearInterval(interval);
+
+    const interval = setInterval(() => {
+      const replayableNow = isReplayableSourceKind(backendClockRef.current.sourceKind);
+      if (replayableNow) {
+        syncFromBackend();
+      }
+    }, REPLAY_SYNC_POLL_MS);
+
+    const slowInterval = setInterval(syncFromBackend, GENERAL_SYNC_POLL_MS);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(slowInterval);
+    };
   }, [cameraId, src]);
 
   useEffect(() => {
     const cleanup = () => {
       const now = Date.now();
-      setAnnotations((prev) => prev.filter((a) => now - a.receivedAt < 30000));
+      const playbackTime = getCurrentPlayerTime();
+      setAnnotations((prev) =>
+        prev.filter((a) => {
+          if (a.frameTime != null) {
+            return a.frameTime >= playbackTime - 4 && a.frameTime <= playbackTime + 10;
+          }
+          return now - a.receivedAt < 1200;
+        })
+      );
     };
     const id = setInterval(cleanup, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [isNativeVideo, isYouTube]);
 
   useEffect(() => {
     if (!isNativeVideo || !videoRef.current) return;
@@ -229,8 +344,48 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
       v.removeEventListener("timeupdate", onTimeUpdate);
       v.removeEventListener("ended", onEnded);
       v.removeEventListener("pause", onPause);
+      v.playbackRate = 1;
     };
   }, [isNativeVideo, backendState.ended]);
+
+  useEffect(() => {
+    if (!isReplayable || isStreamFinished) return;
+
+    let rafId = 0;
+    const tick = () => {
+      const backendSeconds = getEstimatedBackendSeconds();
+      const current = getCurrentPlayerTime();
+      setPlayerCurrentTime(current);
+
+      const drift = backendSeconds - current;
+      const absDrift = Math.abs(drift);
+
+      if (isNativeVideo && videoRef.current) {
+        if (absDrift > 0.2 && absDrift < 1.1) {
+          videoRef.current.playbackRate = drift > 0 ? 1.08 : 0.94;
+        } else if (videoRef.current.playbackRate !== 1) {
+          videoRef.current.playbackRate = 1;
+        }
+      }
+
+      if (absDrift > 1.35) {
+        const seekLead = Math.max(0.08, Math.min(0.32, bufferDelay * 0.3));
+        const target = Math.max(0, backendSeconds - seekLead);
+        if (Math.abs(target - lastSyncTargetRef.current) > 0.35) {
+          seekPlayer(target);
+          lastSyncTargetRef.current = target;
+        }
+      }
+
+      rafId = window.requestAnimationFrame(tick);
+    };
+
+    rafId = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      if (videoRef.current) videoRef.current.playbackRate = 1;
+    };
+  }, [isReplayable, isStreamFinished, bufferDelay, isNativeVideo, isYouTube]);
 
   useEffect(() => {
     if (!isNativeVideo || !videoRef.current || !connected || !src || isStreamFinished) return;
@@ -241,7 +396,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
       videoRef.current?.play?.().catch(() => {
         console.warn("Autoplay blocked; user interaction may be required.");
       });
-    }, Math.round((bufferDelay + 0.2) * 1000));
+    }, Math.round((bufferDelay + 0.18) * 1000));
 
     return () => clearTimeout(timer);
   }, [isNativeVideo, connected, src, isStreamFinished, bufferDelay]);
@@ -254,11 +409,20 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
       setBackendState((prev) => ({
         ...prev,
         current_time_ms: 0,
+        observed_at_ms: Date.now(),
         ended: false,
         worker_running: true,
       }));
+      backendClockRef.current = {
+        currentTimeMs: 0,
+        observedAtMs: Date.now(),
+        workerRunning: true,
+        ended: false,
+        sourceKind: backendClockRef.current.sourceKind,
+      };
       setPlayerCurrentTime(0);
       lastSyncTargetRef.current = 0;
+      latestEventIdRef.current = 0;
       playbackStartedRef.current = false;
       seekPlayer(0);
       if (isNativeVideo && videoRef.current) {
@@ -278,19 +442,17 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
 
     const width = stage.clientWidth;
     const height = stage.clientHeight;
-    const current = isReplayable
-      ? (backendState.current_time_ms || 0) / 1000
-      : playerCurrentTime || 0;
+    const current = hasPreview ? getCurrentPlayerTime() : getEstimatedBackendSeconds();
     const overlayTolerance = isReplayable
-      ? Math.max(0.2, Math.min(0.45, bufferDelay * 0.45))
-      : 0.18;
+      ? Math.max(0.14, Math.min(0.3, bufferDelay * 0.25 + 0.08))
+      : Math.max(0.18, Math.min(0.6, bufferDelay * 0.55));
 
     return annotations
       .filter((a) => {
         if (a.frameTime != null && isReplayable) {
-          return Math.abs(current - a.frameTime) < overlayTolerance;
+          return Math.abs(current - a.frameTime) <= overlayTolerance;
         }
-        return Date.now() - a.receivedAt < 900;
+        return Date.now() - a.receivedAt < Math.max(220, Math.min(600, bufferDelay * 1000));
       })
       .map((a) => {
         const [nx1, ny1, nx2, ny2] = a.bbox || [0, 0, 0, 0];
@@ -310,7 +472,7 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
           a.type === "scuffle" ? "rgba(255,165,0,0.35)" : "rgba(0,255,0,0.3)";
         const label =
           a.type === "scuffle"
-            ? `scuffle${a.subtype ? ` (${a.subtype})` : ""} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim()
+            ? `strangulation${a.subtype ? ` (${a.subtype})` : ""} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim()
             : `${a.subtype ?? "weapon"} ${a.confidence ? a.confidence.toFixed(2) : ""}`.trim();
 
         return (
@@ -461,7 +623,6 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
               x
             </button>
           )}
-
         </div>
       ) : (
         <div className="aspect-video bg-gray-700 flex items-center justify-center rounded-lg relative w-full">

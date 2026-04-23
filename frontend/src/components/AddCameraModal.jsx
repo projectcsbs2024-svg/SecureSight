@@ -5,6 +5,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import ReactPlayer from "react-player";
 import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
+const DETECTION_LABELS = {
+  weapon: "Weapon",
+  scuffle: "Strangulation",
+  stampede: "Stampede",
+};
+
 export const AddCameraModal = ({ onAdd, onClose }) => {
   const [name, setName] = useState("");
   const [latitude, setLatitude] = useState(null);
@@ -169,12 +175,12 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                         onChange={() => toggleDetection(type)}
                         className="accent-primary"
                       />
-                      {type.charAt(0).toUpperCase() + type.slice(1)}
+                      {DETECTION_LABELS[type] || type}
                     </label>
                   ))}
                 </div>
                 <p className="mt-2 text-xs text-gray-400">
-                  New cameras start with Weapon and Scuffle enabled by default.
+                  New cameras start with Weapon and Strangulation enabled by default.
                 </p>
               </div>
 

@@ -1,12 +1,18 @@
-// src/pages/Security.jsx
-import React, { useState, useEffect } from "react";
+import React, { useEffect, useState } from "react";
+import { Edit2, Trash2 } from "lucide-react";
+
 import { Sidebar } from "../components/Sidebar";
 import { Navbar } from "../components/Navbar";
 import { useAuth } from "../context/AuthContext";
-import { Edit2, Trash2 } from "lucide-react";
 import { AddCameraModal } from "../components/AddCameraModal";
 import { EditCameraModal } from "../components/EditCameraModal";
 import api from "../apiHandle/api";
+
+const DETECTION_LABELS = {
+  weapon: "Weapon",
+  scuffle: "Strangulation",
+  stampede: "Stampede",
+};
 
 export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
@@ -18,7 +24,6 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
 
   const sidebarCurrentWidth = sidebarExpanded ? 160 : 60;
 
-  // Utility to format camera for table
   const formatCamera = (cam) => {
     const detections = cam.detections_enabled || [];
     return {
@@ -34,56 +39,42 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     };
   };
 
-  // Fetch all cameras for the user
   useEffect(() => {
     const fetchCameras = async () => {
       try {
         const res = await api.get("/cameras/");
-        const formatted = res.data.map(formatCamera);
-        setCameras(formatted);
+        setCameras(res.data.map(formatCamera));
       } catch (err) {
         console.error("Error fetching cameras:", err);
       } finally {
         setLoading(false);
       }
     };
+
     if (user) fetchCameras();
   }, [user]);
 
-  // Add new camera
   const handleAddCamera = (camera) => {
-    setCameras(prev => [...prev, formatCamera(camera)]);
+    setCameras((prev) => [...prev, formatCamera(camera)]);
     setShowAddModal(false);
   };
 
-  // Save edited camera
   const handleSaveCamera = async (updatedCamera) => {
     try {
       const detections = updatedCamera.detections_enabled || [];
-      const detectionObj = {
-        weapon: detections.includes("weapon"),
-        scuffle: detections.includes("scuffle"),
-        stampede: detections.includes("stampede"),
-      };
-
       const body = {
         name: updatedCamera.name,
         latitude: updatedCamera.latitude,
         longitude: updatedCamera.longitude,
         location: updatedCamera.location,
         stream_url: updatedCamera.stream_url?.trim() || null,
-        detections_enabled: Object.entries(detectionObj)
-          .filter(([_, v]) => v)
-          .map(([k]) => k),
+        detections_enabled: detections,
       };
 
       const res = await api.put(`/cameras/${updatedCamera.id}`, body);
       const cam = res.data;
 
-      setCameras(prev =>
-        prev.map(c => (c.id === cam.id ? formatCamera(cam) : c))
-      );
-
+      setCameras((prev) => prev.map((c) => (c.id === cam.id ? formatCamera(cam) : c)));
       setEditingCamera(null);
     } catch (err) {
       console.error("Error updating camera:", err);
@@ -91,19 +82,17 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     }
   };
 
-  // Delete camera
   const handleDeleteCamera = async (id) => {
     if (!window.confirm("Are you sure you want to delete this camera?")) return;
     try {
       await api.delete(`/cameras/${id}`);
-      setCameras(prev => prev.filter(c => c.id !== id));
+      setCameras((prev) => prev.filter((c) => c.id !== id));
     } catch (err) {
       console.error("Error deleting camera:", err);
       alert("Failed to delete camera");
     }
   };
 
-  // Export all cameras
   const handleExport = async () => {
     try {
       const res = await api.get("/cameras/export/", { responseType: "blob" });
@@ -120,8 +109,9 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
     }
   };
 
-  if (loading)
+  if (loading) {
     return <div className="flex justify-center items-center h-screen text-gray-500">Loading cameras...</div>;
+  }
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -175,9 +165,9 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
                     <td className="px-4 py-3">{cam.name}</td>
                     <td className="px-4 py-3">{cam.gps}</td>
                     <td className="px-4 py-3">
-                      <span>Weapon: <b className={cam.detection.weapon ? "text-green-600" : "text-red-500"}>{cam.detection.weapon ? "✔" : "✖"}</b></span><br />
-                      <span>Scuffle: <b className={cam.detection.scuffle ? "text-green-600" : "text-red-500"}>{cam.detection.scuffle ? "✔" : "✖"}</b></span><br />
-                      <span>Stampede: <b className={cam.detection.stampede ? "text-green-600" : "text-red-500"}>{cam.detection.stampede ? "✔" : "✖"}</b></span>
+                      <span>{DETECTION_LABELS.weapon}: <b className={cam.detection.weapon ? "text-green-600" : "text-red-500"}>{cam.detection.weapon ? "Yes" : "No"}</b></span><br />
+                      <span>{DETECTION_LABELS.scuffle}: <b className={cam.detection.scuffle ? "text-green-600" : "text-red-500"}>{cam.detection.scuffle ? "Yes" : "No"}</b></span><br />
+                      <span>{DETECTION_LABELS.stampede}: <b className={cam.detection.stampede ? "text-green-600" : "text-red-500"}>{cam.detection.stampede ? "Yes" : "No"}</b></span>
                     </td>
                     <td className="px-4 py-3 flex gap-2">
                       <button
@@ -201,9 +191,7 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
         </div>
       </div>
 
-      {showAddModal && (
-        <AddCameraModal onAdd={handleAddCamera} onClose={() => setShowAddModal(false)} />
-      )}
+      {showAddModal && <AddCameraModal onAdd={handleAddCamera} onClose={() => setShowAddModal(false)} />}
 
       {editingCamera && (
         <EditCameraModal camera={editingCamera} onSave={handleSaveCamera} onClose={() => setEditingCamera(null)} />
@@ -212,7 +200,6 @@ export default function Security({ sidebarWidth = 60, navbarHeight = 64 }) {
   );
 }
 
-// Summary Card Component
 const SummaryCard = ({ title, value, color }) => (
   <div className={`bg-white rounded-xl shadow-md p-4 flex items-center gap-3 border-l-4 border-${color}-500`}>
     <div>

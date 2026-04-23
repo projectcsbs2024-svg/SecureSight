@@ -17,6 +17,13 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import api from "../apiHandle/api";
 
+const formatDetectionType = (type, subtype) => {
+  if (type === "weapon") return `Weapon-${subtype || "Unknown"}`;
+  if (type === "scuffle") return `Strangulation-${subtype || "Unknown"}`;
+  if (type === "stampede") return "Stampede";
+  return type || "Detection";
+};
+
 export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const navigate = useNavigate();
@@ -51,14 +58,7 @@ export default function Alerts({ sidebarWidth = 60, navbarHeight = 64 }) {
         return {
           id: d.id,
           camera: d.camera_name || d.camera_id || "Unknown Camera",
-          type:
-            d.type === "weapon"
-              ? `Weapon-${d.subtype || "Unknown"}`
-              : d.type === "scuffle"
-              ? `Scuffle-${d.subtype || "Unknown"}`
-              : d.type === "stampede"
-              ? "Stampede"
-              : d.type || "Detection",
+          type: formatDetectionType(d.type, d.subtype),
           confidence: d.confidence ? (d.confidence * 100).toFixed(2) : "N/A",
           timestamp: d.timestamp,
           time: d.timestamp

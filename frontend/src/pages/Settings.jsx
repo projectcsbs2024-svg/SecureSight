@@ -6,6 +6,12 @@ import { useAuth } from "../context/AuthContext";
 import { Trash2 } from "lucide-react";
 import api from "../apiHandle/api";
 
+const THRESHOLD_LABELS = {
+  weapon: "Weapon",
+  scuffle: "Strangulation",
+  stampede: "Stampede",
+};
+
 export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
@@ -179,7 +185,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
             {["weapon", "scuffle", "stampede"].map((type) => (
               <div key={type} className="flex items-center gap-4 mb-4">
                 <label className="w-40 capitalize text-gray-300">
-                  {type} threshold
+                  {(THRESHOLD_LABELS[type] || type)} threshold
                 </label>
                 <input
                   type="range"

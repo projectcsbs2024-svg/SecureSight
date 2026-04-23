@@ -12,13 +12,29 @@ from urllib.parse import urlparse
 from app.services.ws_manager import ws_manager
 
 
+SCUFFLE_ALIASES = {"scuffle", "choking", "strangulation", "strangle"}
+
+
+def _normalize_enabled_detectors(enabled_detectors):
+    normalized = set()
+    for detector in enabled_detectors or []:
+        key = str(detector or "").strip().lower()
+        if key == "weapon":
+            normalized.add("weapon")
+        elif key in SCUFFLE_ALIASES:
+            normalized.add("scuffle")
+        elif key == "stampede":
+            normalized.add("stampede")
+    return normalized
+
+
 class CameraStreamWorker:
     def __init__(self, camera: Camera, manager):
         self.camera = camera
         self.manager = manager  # reference to WeaponDetectionManager
         self.running = False
         self.thread = None
-        enabled_detectors = camera.detections_enabled or []
+        enabled_detectors = _normalize_enabled_detectors(camera.detections_enabled)
         self.weapon_enabled = "weapon" in enabled_detectors
         self.scuffle_enabled = "scuffle" in enabled_detectors
         self.scuffle_detector = ScuffleSequenceDetector() if self.scuffle_enabled else None
@@ -31,6 +47,7 @@ class CameraStreamWorker:
         self._avg_proc_ms = 40  # rolling average of detection time
         self.frame_skip_target = 80  # desired processing time (ms per frame)
         self.last_detection_time = 0
+        self.last_payload_had_detections = False
 
     def start(self):
         if not self.running:
@@ -56,6 +73,11 @@ class CameraStreamWorker:
         source_kind = self._classify_stream_source(self.camera.stream_url)
         is_seekable_media = source_kind in {"file", "youtube", "media_url"}
         cap = cv2.VideoCapture(resolved_stream_url)
+        if source_kind == "live":
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            except Exception:
+                pass
 
         if not cap.isOpened():
             print(
@@ -81,7 +103,7 @@ class CameraStreamWorker:
 
         try:
             while self.running:
-                ret, frame = cap.read()
+                ret, frame = self._read_current_frame(cap, is_seekable_media)
                 if not ret or frame is None:
                     if is_seekable_media:
                         last_pos = self.manager.current_positions.get(self.camera.id, 0)
@@ -144,13 +166,19 @@ class CameraStreamWorker:
                         print(f"[WeaponWorker] {self.camera.id} avg_proc={self._avg_proc_ms:.1f}ms, skip={self.frame_skip}")
                         self.last_detection_time = time.time()
 
-                    # Broadcast detections if any
-                    if detections:
+                    # Broadcast detections, and explicitly clear stale live overlays when detections disappear.
+                    if detections or self.last_payload_had_detections:
+                        emitted_at_ms = int(time.time() * 1000)
                         payload = {
                             "camera_id": self.camera.id,
+                            "event_id": self.manager.next_event_id(self.camera.id),
                             "processing_ms": processing_ms,
+                            "emitted_at_ms": emitted_at_ms,
+                            "frame_time_ms": frame_time_ms,
+                            "source_kind": source_kind,
                             "detections": detections,
                         }
+                        self.last_payload_had_detections = bool(detections)
                         if ws_manager.loop:
                             try:
                                 asyncio.run_coroutine_threadsafe(
@@ -169,6 +197,17 @@ class CameraStreamWorker:
             db.close()
             self.running = False
             self.manager.worker_finished(self.camera.id)
+
+    def _read_current_frame(self, cap, is_seekable_media: bool):
+        if is_seekable_media:
+            return cap.read()
+
+        # Drain buffered live frames so inference stays close to real time.
+        latest_grabs = max(0, min(self.frame_skip + 1, 4))
+        for _ in range(latest_grabs):
+            if not cap.grab():
+                break
+        return cap.retrieve()
 
     @staticmethod
     def _is_live_stream_source(stream_url: str) -> bool:
@@ -287,6 +326,7 @@ class WeaponDetectionManager:
         self.workers = {}  # camera_id -> CameraStreamWorker
         self.current_positions = {}  # camera_id -> last frame time in ms (for file-based streams)
         self.stream_states = {}  # camera_id -> metadata used by the frontend player
+        self.event_counters = {}  # camera_id -> monotonic websocket event ids
 
     def mark_stream_state(
         self,
@@ -312,6 +352,11 @@ class WeaponDetectionManager:
         if worker and not worker.running:
             self.workers.pop(camera_id, None)
 
+    def next_event_id(self, camera_id: str) -> int:
+        next_id = self.event_counters.get(camera_id, 0) + 1
+        self.event_counters[camera_id] = next_id
+        return next_id
+
     def start_worker(self, camera_id: str):
         existing_worker = self.workers.get(camera_id)
         if existing_worker:
@@ -328,7 +373,7 @@ class WeaponDetectionManager:
             print(f"[WeaponManager] Camera {camera_id} not found.")
             return
 
-        enabled_detectors = camera.detections_enabled or []
+        enabled_detectors = _normalize_enabled_detectors(camera.detections_enabled)
         if "weapon" not in enabled_detectors and "scuffle" not in enabled_detectors:
             print(f"[WeaponManager] No stream detection enabled for camera {camera_id}. Skipping.")
             return
@@ -347,6 +392,7 @@ class WeaponDetectionManager:
             if camera_id in self.current_positions:
                 del self.current_positions[camera_id]
         self.stream_states.pop(camera_id, None)
+        self.event_counters.pop(camera_id, None)
 
     def replay_worker(self, camera_id: str):
         self.stop_worker(camera_id)
@@ -359,7 +405,7 @@ class WeaponDetectionManager:
         db.close()
 
         for cam in cameras:
-            enabled_detectors = cam.detections_enabled or []
+            enabled_detectors = _normalize_enabled_detectors(cam.detections_enabled)
             if cam.stream_url and ("weapon" in enabled_detectors or "scuffle" in enabled_detectors):
                 self.start_worker(cam.id)
 

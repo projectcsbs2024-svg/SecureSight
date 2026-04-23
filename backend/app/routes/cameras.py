@@ -11,6 +11,7 @@ import shutil
 import os
 import uuid
 import csv
+import time
 from fastapi.responses import StreamingResponse
 from io import StringIO
 
@@ -24,6 +25,21 @@ router = APIRouter(prefix="/cameras", tags=["Cameras"])
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+SCUFFLE_ALIASES = {"scuffle", "choking", "strangulation", "strangle"}
+
+
+def normalize_detections_enabled(detections_enabled: Optional[List[str]]) -> List[str]:
+    normalized = []
+    for detection in detections_enabled or []:
+        key = str(detection or "").strip().lower()
+        if key == "weapon" and "weapon" not in normalized:
+            normalized.append("weapon")
+        elif key in SCUFFLE_ALIASES and "scuffle" not in normalized:
+            normalized.append("scuffle")
+        elif key == "stampede" and "stampede" not in normalized:
+            normalized.append("stampede")
+    return normalized
+
 # ----------------------
 # Pydantic models
 # ----------------------
@@ -33,7 +49,7 @@ class CameraCreate(BaseModel):
     longitude: Optional[float] = None
     location: Optional[str] = None
     stream_url: Optional[str] = None
-    detections_enabled: Optional[List[str]] = ["weapon"]  # default to weapon
+    detections_enabled: Optional[List[str]] = ["weapon", "scuffle"]
 
 class CameraUpdate(BaseModel):
     name: Optional[str] = None
@@ -71,7 +87,7 @@ def add_camera(
         location=camera.location,
         stream_url=camera.stream_url,
         user_id=user.id,
-        detections_enabled=camera.detections_enabled or ["weapon"]
+        detections_enabled=normalize_detections_enabled(camera.detections_enabled) or ["weapon", "scuffle"]
     )
 
     db.add(new_camera)
@@ -109,6 +125,8 @@ def update_camera(
     for field in ["name", "latitude", "longitude", "location", "status", "stream_url", "detections_enabled"]:
         value = getattr(camera, field)
         if value is not None:
+            if field == "detections_enabled":
+                value = normalize_detections_enabled(value)
             setattr(db_camera, field, value)
 
     db.commit()
@@ -216,6 +234,7 @@ def get_camera_position(camera_id: str):
     pos = weapon_manager.current_positions.get(camera_id, 0)
     return {
         "current_time_ms": int(state.get("current_time_ms", pos) or 0),
+        "observed_at_ms": int(time.time() * 1000),
         "ended": bool(state.get("ended", False)),
         "source_kind": state.get("source_kind", "unknown"),
         "worker_running": camera_id in weapon_manager.workers,
@@ -250,5 +269,5 @@ def get_current_alert_count():
     """
     Returns total active detection boxes across all cameras (real-time).
     """
-    total_boxes = sum(ws_manager.active_alerts.values())
+    total_boxes = ws_manager.get_total_active_alerts()
     return {"current_alerts": total_boxes}

@@ -4,6 +4,12 @@ import { MapPicker } from "../components/MapPicker";
 import ReactPlayer from "react-player";
 import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
 
+const DETECTION_LABELS = {
+  weapon: "Weapon",
+  scuffle: "Strangulation",
+  stampede: "Stampede",
+};
+
 export const EditCameraModal = ({ camera, onSave, onClose }) => {
   const [cameraData, setCameraData] = useState({
     name: "",
@@ -199,7 +205,7 @@ export const EditCameraModal = ({ camera, onSave, onClose }) => {
                       onChange={() => toggleDetection(type)}
                       className="accent-primary"
                     />
-                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                    {DETECTION_LABELS[type] || type}
                   </label>
                 ))}
               </div>

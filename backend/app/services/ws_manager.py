@@ -1,17 +1,18 @@
-# app/services/ws_manager.py
-
 import asyncio
 import json
 from typing import Dict, Set
+
 from starlette.websockets import WebSocket
-from app.services.dashboard_ws import dashboard_ws_manager  # ✅ import for dashboard updates
+
+from app.services.dashboard_ws import dashboard_ws_manager
+
 
 class WebSocketManager:
     def __init__(self):
-        # camera_id -> set of WebSocket connections
         self.connections: Dict[str, Set[WebSocket]] = {}
         self.loop: asyncio.AbstractEventLoop | None = None
-        self.active_alerts: Dict[str, int] = {}  # 👈 track number of boxes per camera
+        self.active_alerts: Dict[str, int] = {}
+        self.last_event_at: Dict[str, float] = {}
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         self.loop = loop
@@ -37,26 +38,24 @@ class WebSocketManager:
             pass
 
     async def broadcast(self, camera_id: str, message: dict):
-        """
-        Broadcast message (dict) to all websockets connected to camera_id.
-        Also updates dashboard with total active bounding boxes.
-        """
         detections = message.get("detections", [])
         self.active_alerts[camera_id] = len(detections)
+        self.last_event_at[camera_id] = asyncio.get_running_loop().time()
 
-        # 🔁 Notify dashboard clients with current total alerts
-        total_boxes = sum(self.active_alerts.values())
         try:
-            await dashboard_ws_manager.broadcast({
-                "type": "current_alerts_update",
-                "current_alerts": total_boxes
-            })
-        except Exception as e:
-            print(f"[WSManager] Dashboard broadcast error: {e}")
+            await dashboard_ws_manager.broadcast(
+                {
+                    "type": "current_alerts_update",
+                    "current_alerts": self.get_total_active_alerts(),
+                }
+            )
+        except Exception as exc:
+            print(f"[WSManager] Dashboard broadcast error: {exc}")
 
         conns = list(self.connections.get(camera_id, []))
         if not conns:
             return
+
         payload = json.dumps(message, default=str)
         to_remove = []
         for ws in conns:
@@ -64,8 +63,16 @@ class WebSocketManager:
                 await ws.send_text(payload)
             except Exception:
                 to_remove.append(ws)
+
         for ws in to_remove:
             self.disconnect(camera_id, ws)
 
-# Singleton
+    def get_total_active_alerts(self, max_age_seconds: float = 1.5) -> int:
+        now = asyncio.get_event_loop().time()
+        for camera_id, timestamp in list(self.last_event_at.items()):
+            if now - timestamp > max_age_seconds:
+                self.active_alerts[camera_id] = 0
+        return sum(self.active_alerts.values())
+
+
 ws_manager = WebSocketManager()
