@@ -2,12 +2,13 @@ import os
 import shutil
 from collections import Counter
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
 from app.models import Detection, User, Camera
 from app.routes.auth import get_current_user
+from app.services.ws_manager import ws_manager
 from typing import List
 
 router = APIRouter(prefix="/detections", tags=["Detections"])
@@ -135,38 +136,30 @@ def get_detections(
 # -------------------------------------------------------
 # Route: Detection Stats (Safe, No 422)
 # -------------------------------------------------------
-from fastapi import Request
-from datetime import datetime
-
 @router.get("/stats")
-def get_detection_stats(request: Request, db: Session = Depends(get_db)):
+def get_detection_stats(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     """
     Return live detection statistics for dashboard.
 
     Always returns 200 OK — never raises auth errors.
     Used by LiveView.jsx to show 'Total Alerts Today' and 'Current Alerts'.
     """
-    try:
-        from app.routes.auth import get_current_user
-        user = get_current_user(request=request, db=db)
-    except Exception as e:
-        print(f"[Stats] Auth skipped due to: {e}")
-        user = None
-
-    # Base query (optionally filtered by user)
-    query = db.query(Detection)
-    if user:
-        query = query.filter(Detection.user_id == user.id)
+    query = db.query(Detection).filter(Detection.user_id == user.id)
 
     today = datetime.utcnow().date()
     start_of_day = datetime.combine(today, datetime.min.time())
 
     total_today = query.filter(Detection.timestamp >= start_of_day).count()
+    current_alerts = ws_manager.get_total_active_alerts()
     active = query.filter(Detection.status.ilike("active")).count()
     resolved = query.filter(Detection.status.ilike("resolved")).count()
 
     return {
         "total_today": total_today,
+        "current_alerts": current_alerts,
         "active": active,
         "resolved": resolved
     }

@@ -17,6 +17,8 @@ export default function LiveView() {
   const [stats, setStats] = useState({ total_today: 0, current_alerts: 0 });
   const { user } = useAuth();
   const navigate = useNavigate();
+  const seenDetectionIdsRef = useRef(new Set());
+  const dashboardWsRef = useRef(null);
 
   // 🧭 Redirect if not logged in
   useEffect(() => {
@@ -53,13 +55,10 @@ export default function LiveView() {
     if (!user) return; // 👈 wait for Firebase user
     const fetchStats = async () => {
       try {
-        const [todayRes, currentRes] = await Promise.all([
-          api.get("/detections/stats"),
-          api.get("/cameras/active_count"),
-        ]);
+        const statsRes = await api.get("/detections/stats");
         setStats({
-          total_today: todayRes.data.total_today,
-          current_alerts: currentRes.data.current_alerts,
+          total_today: statsRes.data.total_today ?? 0,
+          current_alerts: statsRes.data.current_alerts ?? 0,
         });
       } catch (err) {
         console.error("Error fetching alert stats:", err);
@@ -67,9 +66,84 @@ export default function LiveView() {
     };
 
     fetchStats();
-    const interval = setInterval(fetchStats, 5000); // Refresh every 5 seconds
+    const interval = setInterval(fetchStats, 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const apiBase = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000").replace(
+      /^http(s?)/,
+      wsProtocol
+    );
+    const wsUrl = `${apiBase.replace(/\/$/, "")}/dashboard/ws`;
+    let reconnectTimer = null;
+    let closedByUs = false;
+
+    const connect = () => {
+      try {
+        const ws = new WebSocket(wsUrl);
+        dashboardWsRef.current = ws;
+
+        ws.onopen = () => {
+          try {
+            ws.send("liveview");
+          } catch {}
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data);
+            if (message.type === "current_alerts_update") {
+              setStats((prev) => ({
+                ...prev,
+                current_alerts: message.current_alerts ?? 0,
+              }));
+            }
+          } catch (error) {
+            console.error("Dashboard WS parse error:", error);
+          }
+        };
+
+        ws.onclose = () => {
+          dashboardWsRef.current = null;
+          if (!closedByUs) {
+            reconnectTimer = setTimeout(connect, 1500);
+          }
+        };
+
+        ws.onerror = (error) => {
+          console.error("Dashboard WS error:", error);
+        };
+      } catch (error) {
+        console.error("Dashboard WS connection error:", error);
+        if (!closedByUs) {
+          reconnectTimer = setTimeout(connect, 1500);
+        }
+      }
+    };
+
+    connect();
+
+    return () => {
+      closedByUs = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (dashboardWsRef.current) {
+        try {
+          dashboardWsRef.current.close();
+        } catch {}
+        dashboardWsRef.current = null;
+      }
+    };
+  }, [user]);
+
+  useEffect(() => {
+    if (cameras.length === 0) {
+      setStats((prev) => ({ ...prev, current_alerts: 0 }));
+    }
+  }, [cameras.length]);
 
   // ➕ Add new camera
   const handleAddCamera = (newCameraFromBackend) => {
@@ -101,6 +175,27 @@ export default function LiveView() {
     audio.play().catch(() => {
       console.warn("⚠️ Alert tone blocked by autoplay policy");
     });
+  };
+
+  const handleNewDetection = (_cameraId, detections = []) => {
+    if (!Array.isArray(detections) || detections.length === 0) return;
+
+    playAlertTone();
+
+    let newDetections = 0;
+    for (const detection of detections) {
+      const detectionId = detection?.detection_id;
+      if (detectionId == null || seenDetectionIdsRef.current.has(detectionId)) continue;
+      seenDetectionIdsRef.current.add(detectionId);
+      newDetections += 1;
+    }
+
+    if (newDetections > 0) {
+      setStats((prev) => ({
+        ...prev,
+        total_today: prev.total_today + newDetections,
+      }));
+    }
   };
 
   const activeCameras = cameras.length;
@@ -153,7 +248,7 @@ export default function LiveView() {
                   status={cam.status || "online"}
                   onDelete={() => handleDeleteCamera(cam.id)}
                   // 🔔 Hook into detection events for global alert
-                  onNewDetection={playAlertTone}
+                  onNewDetection={handleNewDetection}
                 />
               ))
             )}
