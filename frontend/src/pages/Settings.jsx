@@ -16,6 +16,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
   const { user } = useAuth();
   const [sidebarExpanded, setSidebarExpanded] = useState(false);
   const [alertEmails, setAlertEmails] = useState([]);
+  const [emailAlertsEnabled, setEmailAlertsEnabled] = useState(true);
   const [thresholds, setThresholds] = useState({
     weapon: 50,
     scuffle: 50,
@@ -37,6 +38,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
 
         const data = res.data;
         setAlertEmails(data.alert_emails || []);
+        setEmailAlertsEnabled(data.email_alerts_enabled ?? true);
         setThresholds({
           weapon: Math.round((data.weapon_threshold || 0.8) * 100),
           scuffle: Math.round((data.scuffle_threshold || 0.45) * 100),
@@ -77,6 +79,7 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
         "/settings/",
         {
           alert_emails: cleanedEmails,
+          email_alerts_enabled: emailAlertsEnabled,
           weapon_threshold: thresholds.weapon / 100,
           scuffle_threshold: thresholds.scuffle / 100,
           stampede_threshold: thresholds.stampede / 100,
@@ -149,18 +152,43 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
             <h2 className="text-xl font-semibold mb-4 text-white">
               Alert Recipients
             </h2>
+            <div className="flex items-center justify-between gap-4 mb-4 rounded-lg border border-gray-700 bg-gray-850/40 px-4 py-3">
+              <div>
+                <div className="text-sm font-medium text-white">Email Alerts</div>
+                <p className="text-xs text-gray-400 mt-1">
+                  Turn email notifications on or off without removing saved recipient addresses.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmailAlertsEnabled((prev) => !prev)}
+                className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors ${
+                  emailAlertsEnabled ? "bg-green-600" : "bg-gray-600"
+                }`}
+                aria-pressed={emailAlertsEnabled}
+                aria-label="Toggle email alerts"
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    emailAlertsEnabled ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+            </div>
             {alertEmails.map((email, index) => (
               <div key={index} className="flex items-center gap-2 mb-2">
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => updateAlertEmail(index, e.target.value)}
-                  className="border rounded px-2 py-1 flex-1 bg-gray-700 text-white"
+                  className="border rounded px-2 py-1 flex-1 bg-gray-700 text-white disabled:opacity-60 disabled:cursor-not-allowed"
                   placeholder="Enter email address"
+                  disabled={!emailAlertsEnabled}
                 />
                 <button
                   onClick={() => deleteAlertEmail(index)}
-                  className="p-1 hover:text-red-500"
+                  className="p-1 hover:text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={!emailAlertsEnabled}
                 >
                   <Trash2 size={18} />
                 </button>
@@ -168,12 +196,15 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
             ))}
             <button
               onClick={addAlertEmail}
-              className="bg-blue-600 text-white px-3 py-1 rounded mt-2 hover:bg-blue-700"
+              disabled={!emailAlertsEnabled}
+              className="bg-blue-600 text-white px-3 py-1 rounded mt-2 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed"
             >
               Add Email
             </button>
             <p className="text-xs text-gray-400 mt-3">
-              Alert emails are used for live detection notifications. SMTP must be configured on the backend.
+              {emailAlertsEnabled
+                ? "Alert emails are used for live detection notifications. SMTP must be configured on the backend."
+                : "Email alerts are disabled. Saved recipient addresses will be kept until you turn alerts back on."}
             </p>
           </div>
 
@@ -205,9 +236,9 @@ export default function Settings({ sidebarWidth = 60, navbarHeight = 64 }) {
           <div className="flex justify-end gap-3">
             <button
               onClick={handleSendTestEmail}
-              disabled={sendingTest}
+              disabled={sendingTest || !emailAlertsEnabled}
               className={`px-4 py-2 rounded ${
-                sendingTest
+                sendingTest || !emailAlertsEnabled
                   ? "bg-gray-600 cursor-not-allowed text-gray-200"
                   : "bg-blue-600 text-white hover:bg-blue-700"
               }`}

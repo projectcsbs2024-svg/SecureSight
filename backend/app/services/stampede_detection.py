@@ -154,9 +154,10 @@ class StampedeDetector:
             settings = db.query(UserSetting).filter(UserSetting.user_id == camera.user_id).first()
             stampede_threshold = settings.stampede_threshold if settings else DEFAULT_STAMPEDE_THRESHOLD
             recipients = []
-            if settings and settings.alert_emails:
+            email_alerts_enabled = bool(getattr(settings, "email_alerts_enabled", True)) if settings else True
+            if email_alerts_enabled and settings and settings.alert_emails:
                 recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
-            elif camera.user and camera.user.email:
+            elif email_alerts_enabled and camera.user and camera.user.email:
                 recipients = [camera.user.email]
         finally:
             db.close()

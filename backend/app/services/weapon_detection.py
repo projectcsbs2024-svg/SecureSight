@@ -69,9 +69,10 @@ def detect_weapons_from_frame(frame, camera_id: str, frame_time_ms: float | None
         settings = db.query(UserSetting).filter(UserSetting.user_id == user_id).first()
         weapon_threshold = settings.weapon_threshold if settings else 0.8
         recipients = []
-        if settings and settings.alert_emails:
+        email_alerts_enabled = bool(getattr(settings, "email_alerts_enabled", True)) if settings else True
+        if email_alerts_enabled and settings and settings.alert_emails:
             recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
-        elif camera.user and camera.user.email:
+        elif email_alerts_enabled and camera.user and camera.user.email:
             recipients = [camera.user.email]
 
         timestamp = datetime.now(timezone.utc)

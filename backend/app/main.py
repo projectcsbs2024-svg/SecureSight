@@ -46,13 +46,18 @@ def ensure_database_schema():
     Base.metadata.create_all(bind=engine)
 
     inspector = inspect(engine)
-    if not inspector.has_table("cameras"):
-        return
+    with engine.begin() as connection:
+        if inspector.has_table("cameras"):
+            camera_columns = {column["name"] for column in inspector.get_columns("cameras")}
+            if "stampede_person_limit" not in camera_columns:
+                connection.execute(text("ALTER TABLE cameras ADD COLUMN stampede_person_limit INTEGER"))
 
-    camera_columns = {column["name"] for column in inspector.get_columns("cameras")}
-    if "stampede_person_limit" not in camera_columns:
-        with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE cameras ADD COLUMN stampede_person_limit INTEGER"))
+        if inspector.has_table("user_settings"):
+            settings_columns = {column["name"] for column in inspector.get_columns("user_settings")}
+            if "email_alerts_enabled" not in settings_columns:
+                connection.execute(
+                    text("ALTER TABLE user_settings ADD COLUMN email_alerts_enabled BOOLEAN NOT NULL DEFAULT 1")
+                )
 
 # ----------------------
 # WebSocket: Dashboard Updates

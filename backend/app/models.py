@@ -25,6 +25,7 @@ class UserSetting(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     alert_emails = Column(String, nullable=True)  # comma-separated string
+    email_alerts_enabled = Column(Boolean, default=True, nullable=False)
     weapon_threshold = Column(Float, default=0.8)
     scuffle_threshold = Column(Float, default=0.45)
     stampede_threshold = Column(Float, default=0.75)

@@ -13,12 +13,14 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 
 class SettingsRequest(BaseModel):
     alert_emails: list[str]
+    email_alerts_enabled: bool = True
     weapon_threshold: float = 0.8
     scuffle_threshold: float = 0.45
     stampede_threshold: float = 0.75
 
 class SettingsResponse(BaseModel):
     alert_emails: list[str]
+    email_alerts_enabled: bool
     weapon_threshold: float
     scuffle_threshold: float
     stampede_threshold: float
@@ -29,6 +31,7 @@ def get_settings_safe(user=Depends(get_current_user), db: Session = Depends(get_
     if not settings:
         return SettingsResponse(
             alert_emails=["test@example.com"],
+            email_alerts_enabled=True,
             weapon_threshold=0.8,
             scuffle_threshold=0.45,
             stampede_threshold=0.75
@@ -36,6 +39,7 @@ def get_settings_safe(user=Depends(get_current_user), db: Session = Depends(get_
     alert_emails = settings.alert_emails.split(",") if settings.alert_emails else []
     return SettingsResponse(
         alert_emails=alert_emails,
+        email_alerts_enabled=bool(getattr(settings, "email_alerts_enabled", True)),
         weapon_threshold=settings.weapon_threshold,
         scuffle_threshold=settings.scuffle_threshold,
         stampede_threshold=settings.stampede_threshold
@@ -48,6 +52,7 @@ def create_or_update_settings_safe(req: SettingsRequest, user=Depends(get_curren
         settings = UserSetting(
             user_id=user.id,
             alert_emails=",".join(req.alert_emails),
+            email_alerts_enabled=req.email_alerts_enabled,
             weapon_threshold=req.weapon_threshold,
             scuffle_threshold=req.scuffle_threshold,
             stampede_threshold=req.stampede_threshold
@@ -55,6 +60,7 @@ def create_or_update_settings_safe(req: SettingsRequest, user=Depends(get_curren
         db.add(settings)
     else:
         settings.alert_emails = ",".join(req.alert_emails)
+        settings.email_alerts_enabled = req.email_alerts_enabled
         settings.weapon_threshold = req.weapon_threshold
         settings.scuffle_threshold = req.scuffle_threshold
         settings.stampede_threshold = req.stampede_threshold
@@ -63,6 +69,7 @@ def create_or_update_settings_safe(req: SettingsRequest, user=Depends(get_curren
     db.refresh(settings)
     return SettingsResponse(
         alert_emails=req.alert_emails,
+        email_alerts_enabled=settings.email_alerts_enabled,
         weapon_threshold=settings.weapon_threshold,
         scuffle_threshold=settings.scuffle_threshold,
         stampede_threshold=settings.stampede_threshold
@@ -72,6 +79,9 @@ def create_or_update_settings_safe(req: SettingsRequest, user=Depends(get_curren
 @router.post("/test_email")
 def send_test_email(user=Depends(get_current_user), db: Session = Depends(get_db)):
     settings = db.query(UserSetting).filter(UserSetting.user_id == user.id).first()
+    if settings and not bool(getattr(settings, "email_alerts_enabled", True)):
+        raise HTTPException(status_code=400, detail="Email alerts are currently disabled in settings")
+
     recipients = []
     if settings and settings.alert_emails:
         recipients = [email.strip() for email in settings.alert_emails.split(",") if email.strip()]
