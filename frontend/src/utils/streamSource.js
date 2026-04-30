@@ -10,6 +10,11 @@ export const isYouTubeUrl = (value) => {
   }
 };
 
+export const isBrowserWebcamSource = (value) => {
+  if (!value) return false;
+  return String(value).toLowerCase().startsWith("webcam://");
+};
+
 export const isNativeVideoUrl = (value) => {
   if (!value) return false;
   const lower = value.toLowerCase();

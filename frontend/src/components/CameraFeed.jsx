@@ -3,6 +3,7 @@ import ReactPlayer from "react-player";
 
 import api from "../apiHandle/api.jsx";
 import {
+  isBrowserWebcamSource,
   isNativeVideoUrl,
   isReplayableSourceKind,
   isYouTubeUrl,
@@ -16,10 +17,14 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
   const containerRef = useRef(null);
   const stageRef = useRef(null);
   const videoRef = useRef(null);
+  const webcamCanvasRef = useRef(null);
   const reactPlayerRef = useRef(null);
   const wsRef = useRef(null);
   const reconAttemptRef = useRef(0);
   const playbackStartedRef = useRef(false);
+  const webcamStreamRef = useRef(null);
+  const webcamUploadInFlightRef = useRef(false);
+  const webcamStartedAtRef = useRef(0);
   const lastSyncTargetRef = useRef(0);
   const latestEventIdRef = useRef(0);
   const processingSamplesRef = useRef([]);
@@ -46,8 +51,9 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
 
   const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
   const isYouTube = isYouTubeUrl(src);
+  const isBrowserWebcam = isBrowserWebcamSource(src);
   const isNativeVideo = isNativeVideoUrl(src) && !isYouTube;
-  const hasPreview = isYouTube || isNativeVideo;
+  const hasPreview = isYouTube || isNativeVideo || isBrowserWebcam;
   const isReplayable = isReplayableSourceKind(backendState.source_kind);
   const isStreamFinished = backendState.ended;
 
@@ -303,6 +309,105 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
       }
     };
   }, [cameraId, API_BASE, onNewDetection]);
+
+  useEffect(() => {
+    if (!isBrowserWebcam || !videoRef.current) return;
+
+    let cancelled = false;
+
+    const startWebcam = async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
+        webcamStreamRef.current = stream;
+        webcamStartedAtRef.current = Date.now();
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+        applyBackendSnapshot({
+          current_time_ms: 0,
+          observed_at_ms: Date.now(),
+          ended: false,
+          source_kind: "webcam",
+          worker_running: true,
+        });
+      } catch (error) {
+        console.error("Unable to open webcam for camera feed:", error);
+      }
+    };
+
+    startWebcam();
+
+    return () => {
+      cancelled = true;
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+        webcamStreamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+    };
+  }, [isBrowserWebcam]);
+
+  useEffect(() => {
+    if (!isBrowserWebcam || !videoRef.current) return;
+
+    const intervalId = window.setInterval(async () => {
+      if (webcamUploadInFlightRef.current) return;
+      if (!webcamStreamRef.current) return;
+      if (videoRef.current.readyState < 2) return;
+
+      const canvas = webcamCanvasRef.current || document.createElement("canvas");
+      webcamCanvasRef.current = canvas;
+      const width = videoRef.current.videoWidth || 640;
+      const height = videoRef.current.videoHeight || 360;
+      if (!width || !height) return;
+
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      context.drawImage(videoRef.current, 0, 0, width, height);
+      webcamUploadInFlightRef.current = true;
+
+      canvas.toBlob(async (blob) => {
+        if (!blob) {
+          webcamUploadInFlightRef.current = false;
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append("file", blob, `webcam-${cameraId}.jpg`);
+          formData.append(
+            "frame_time_ms",
+            String(Math.max(0, Date.now() - webcamStartedAtRef.current))
+          );
+
+          await api.post(`/cameras/${cameraId}/webcam-frame/`, formData, {
+            headers: { "Content-Type": "multipart/form-data" },
+          });
+        } catch (error) {
+          console.error("Failed to send webcam frame:", error);
+        } finally {
+          webcamUploadInFlightRef.current = false;
+        }
+      }, "image/jpeg", 0.72);
+    }, 450);
+
+    return () => {
+      window.clearInterval(intervalId);
+      webcamUploadInFlightRef.current = false;
+    };
+  }, [cameraId, isBrowserWebcam]);
 
   useEffect(() => {
     playbackStartedRef.current = false;
@@ -608,9 +713,10 @@ export const CameraFeed = ({ cameraId, src, name, status, onDelete, onNewDetecti
             ) : (
               <video
                 ref={videoRef}
-                src={src}
+                src={isBrowserWebcam ? undefined : src}
                 muted
                 playsInline
+                autoPlay={isBrowserWebcam}
                 loop={false}
                 className="rounded-xl w-full h-full object-cover select-none bg-black"
                 style={{ display: "block" }}

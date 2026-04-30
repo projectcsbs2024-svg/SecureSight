@@ -1,6 +1,6 @@
 # app/routes/cameras.py
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, WebSocket, Form
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from app.database import get_db
@@ -12,12 +12,17 @@ import os
 import uuid
 import csv
 import time
+import cv2
+import numpy as np
 from fastapi.responses import StreamingResponse
 from io import StringIO
 
 # Import stream detection manager singleton
 from app.services.weapon_worker import weapon_manager
 from app.services.ws_manager import ws_manager
+from app.services.weapon_detection import detect_weapons_from_frame
+from app.services.scuffle_detection import ScuffleSequenceDetector
+from app.services.stampede_detection import StampedeDetector
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
 
@@ -26,6 +31,7 @@ UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 SCUFFLE_ALIASES = {"scuffle", "choking", "strangulation", "strangle"}
+webcam_processors = {}
 
 
 def normalize_detections_enabled(detections_enabled: Optional[List[str]]) -> List[str]:
@@ -39,6 +45,22 @@ def normalize_detections_enabled(detections_enabled: Optional[List[str]]) -> Lis
         elif key == "stampede" and "stampede" not in normalized:
             normalized.append("stampede")
     return normalized
+
+
+def get_webcam_processors(camera_id: str, detections_enabled: Optional[List[str]]):
+    normalized = normalize_detections_enabled(detections_enabled)
+    processor = webcam_processors.get(camera_id)
+
+    if processor and processor.get("enabled") == tuple(normalized):
+        return processor
+
+    processor = {
+        "enabled": tuple(normalized),
+        "scuffle_detector": ScuffleSequenceDetector() if "scuffle" in normalized else None,
+        "stampede_detector": StampedeDetector() if "stampede" in normalized else None,
+    }
+    webcam_processors[camera_id] = processor
+    return processor
 
 # ----------------------
 # Pydantic models
@@ -164,6 +186,7 @@ def update_camera(
 
     db.commit()
     db.refresh(db_camera)
+    webcam_processors.pop(db_camera.id, None)
 
     # Start/stop stream worker based on enabled realtime detections
     if any(det in (db_camera.detections_enabled or []) for det in ["weapon", "scuffle", "stampede"]):
@@ -186,6 +209,7 @@ def delete_camera(camera_id: str, user=Depends(get_current_user), db: Session = 
     
     # Stop YOLO worker if running
     weapon_manager.stop_worker(db_camera.id)
+    webcam_processors.pop(db_camera.id, None)
 
     # Optional: remove uploaded video file if exists
     if db_camera.stream_url and db_camera.stream_url.startswith("/videos/"):
@@ -282,7 +306,78 @@ def get_camera_position(camera_id: str):
         "observed_at_ms": int(time.time() * 1000),
         "ended": bool(state.get("ended", False)),
         "source_kind": state.get("source_kind", "unknown"),
-        "worker_running": camera_id in weapon_manager.workers,
+        "worker_running": weapon_manager.is_camera_active(camera_id),
+    }
+
+
+@router.post("/{camera_id}/webcam-frame/")
+async def process_webcam_frame(
+    camera_id: str,
+    file: UploadFile = File(...),
+    frame_time_ms: Optional[float] = Form(None),
+    user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    db_camera = db.query(Camera).filter(Camera.id == camera_id, Camera.user_id == user.id).first()
+    if not db_camera:
+        raise HTTPException(status_code=404, detail="Camera not found")
+
+    if not db_camera.stream_url or not db_camera.stream_url.lower().startswith("webcam://"):
+        raise HTTPException(status_code=400, detail="Camera is not configured for webcam input")
+
+    image_bytes = await file.read()
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="Empty webcam frame")
+
+    frame_array = np.frombuffer(image_bytes, dtype=np.uint8)
+    frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid webcam frame")
+
+    enabled = normalize_detections_enabled(db_camera.detections_enabled)
+    if not any(det in enabled for det in ["weapon", "scuffle", "stampede"]):
+        return {"message": "No detections enabled", "detections": []}
+
+    processor = get_webcam_processors(db_camera.id, enabled)
+    detections = []
+    started_at = time.time()
+
+    if "weapon" in enabled:
+        detections.extend(detect_weapons_from_frame(frame, db_camera.id, frame_time_ms))
+    if processor.get("scuffle_detector"):
+        detections.extend(processor["scuffle_detector"].process_frame(frame, db_camera.id, frame_time_ms))
+    if processor.get("stampede_detector"):
+        detections.extend(processor["stampede_detector"].process_frame(frame, db_camera.id, frame_time_ms))
+
+    processing_ms = int((time.time() - started_at) * 1000)
+    weapon_manager.mark_external_activity(
+        db_camera.id,
+        current_time_ms=frame_time_ms or 0,
+        source_kind="webcam",
+    )
+
+    payload = {
+        "camera_id": db_camera.id,
+        "event_id": weapon_manager.next_event_id(db_camera.id),
+        "processing_ms": processing_ms,
+        "emitted_at_ms": int(time.time() * 1000),
+        "frame_time_ms": frame_time_ms,
+        "source_kind": "webcam",
+        "detections": detections,
+    }
+
+    if ws_manager.loop:
+        try:
+            await ws_manager.broadcast(db_camera.id, payload)
+        except Exception as exc:
+            print(f"[Cameras] Webcam WS broadcast failed for {db_camera.id}: {exc}")
+    else:
+        print("[Cameras] ws_manager.loop not set; webcam detections not broadcast")
+
+    return {
+        "message": "Frame processed",
+        "detections": detections,
+        "processing_ms": processing_ms,
     }
 
 @router.post("/{camera_id}/replay")

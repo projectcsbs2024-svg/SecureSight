@@ -284,6 +284,9 @@ class CameraStreamWorker:
         if host in {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}:
             return "youtube"
 
+        if scheme == "webcam":
+            return "webcam"
+
         if scheme in {"rtsp", "rtsps", "rtmp", "rtmps", "udp", "tcp"}:
             return "live"
 
@@ -356,6 +359,7 @@ class WeaponDetectionManager:
         self.current_positions = {}  # camera_id -> last frame time in ms (for file-based streams)
         self.stream_states = {}  # camera_id -> metadata used by the frontend player
         self.event_counters = {}  # camera_id -> monotonic websocket event ids
+        self.external_activity = {}  # camera_id -> last external frame wall time
 
     def mark_stream_state(
         self,
@@ -408,10 +412,35 @@ class WeaponDetectionManager:
             return
 
         source_kind = CameraStreamWorker._classify_stream_source(camera.stream_url)
+        if source_kind == "webcam":
+            self.mark_stream_state(camera_id, current_time_ms=0, ended=False, source_kind=source_kind)
+            return
         self.mark_stream_state(camera_id, current_time_ms=0, ended=False, source_kind=source_kind)
         worker = CameraStreamWorker(camera, self)
         worker.start()
         self.workers[camera_id] = worker
+
+    def mark_external_activity(
+        self,
+        camera_id: str,
+        current_time_ms: float | int | None = None,
+        source_kind: str = "webcam",
+    ):
+        self.external_activity[camera_id] = time.time()
+        self.mark_stream_state(
+            camera_id,
+            current_time_ms=current_time_ms,
+            ended=False,
+            source_kind=source_kind,
+        )
+
+    def is_camera_active(self, camera_id: str, max_age_seconds: float = 2.5) -> bool:
+        if camera_id in self.workers:
+            return True
+        last_seen = self.external_activity.get(camera_id)
+        if last_seen is None:
+            return False
+        return (time.time() - last_seen) <= max_age_seconds
 
     def stop_worker(self, camera_id: str):
         worker = self.workers.get(camera_id)
@@ -420,6 +449,7 @@ class WeaponDetectionManager:
             self.workers.pop(camera_id, None)
             if camera_id in self.current_positions:
                 del self.current_positions[camera_id]
+        self.external_activity.pop(camera_id, None)
         self.stream_states.pop(camera_id, None)
         self.event_counters.pop(camera_id, None)
 
@@ -446,6 +476,7 @@ class WeaponDetectionManager:
         self.workers.clear()
         self.current_positions.clear()
         self.stream_states.clear()
+        self.external_activity.clear()
         print("[WeaponManager] All camera stream workers stopped.")
 
 

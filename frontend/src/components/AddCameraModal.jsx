@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import api from "../apiHandle/api.jsx";
 import { MapPicker } from "../components/MapPicker";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactPlayer from "react-player";
-import { isNativeVideoUrl, isYouTubeUrl } from "../utils/streamSource";
+import {
+  isNativeVideoUrl,
+  isYouTubeUrl,
+} from "../utils/streamSource";
 
 const DETECTION_LABELS = {
   weapon: "Weapon",
@@ -20,11 +23,53 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
   const [file, setFile] = useState(null);
   const [url, setUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [webcamError, setWebcamError] = useState("");
+  const [webcamReady, setWebcamReady] = useState(false);
   const [detectionsEnabled, setDetectionsEnabled] = useState([
     "weapon",
     "scuffle",
   ]);
   const [stampedePersonLimit, setStampedePersonLimit] = useState("");
+  const webcamVideoRef = useRef(null);
+  const webcamStreamRef = useRef(null);
+
+  useEffect(() => {
+    const startWebcamPreview = async () => {
+      if (mode !== "webcam") return;
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        webcamStreamRef.current = stream;
+        setWebcamReady(true);
+        setWebcamError("");
+
+        if (webcamVideoRef.current) {
+          webcamVideoRef.current.srcObject = stream;
+          await webcamVideoRef.current.play().catch(() => {});
+        }
+      } catch (err) {
+        console.error("Webcam access failed:", err);
+        setWebcamReady(false);
+        setWebcamError("Camera access was blocked or is unavailable in this browser.");
+      }
+    };
+
+    startWebcamPreview();
+
+    return () => {
+      if (webcamStreamRef.current) {
+        webcamStreamRef.current.getTracks().forEach((track) => track.stop());
+        webcamStreamRef.current = null;
+      }
+      setWebcamReady(false);
+      if (webcamVideoRef.current) {
+        webcamVideoRef.current.srcObject = null;
+      }
+    };
+  }, [mode]);
 
   const handleFileChange = (e) => {
     const selected = e.target.files[0];
@@ -69,6 +114,14 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
     if (mode === "url" && !streamUrl) {
       alert("Stream URL is required when using URL mode");
       return;
+    }
+
+    if (mode === "webcam") {
+      if (!webcamStreamRef.current) {
+        alert("Webcam access is required to add a webcam feed");
+        return;
+      }
+      streamUrl = "webcam://browser";
     }
 
     if (detectionsEnabled.length === 0) {
@@ -237,6 +290,16 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                 >
                   Stream URL
                 </button>
+                <button
+                  onClick={() => setMode("webcam")}
+                  className={`px-2 py-1 rounded-lg text-xs sm:text-sm transition-all ${
+                    mode === "webcam"
+                      ? "bg-primary text-white"
+                      : "bg-gray-700 text-gray-300"
+                  }`}
+                >
+                  Webcam
+                </button>
               </div>
 
               {mode === "file" ? (
@@ -275,7 +338,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                     </motion.div>
                   )}
                 </div>
-              ) : (
+              ) : mode === "url" ? (
                 <>
                   <input
                     type="text"
@@ -325,6 +388,32 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                     </div>
                   )}
                 </>
+              ) : (
+                <div className="mb-3">
+                  <p className="mb-3 text-xs text-gray-400">
+                    The browser camera preview will be used as a live source, and frames will be sent to the backend for the same model pipeline used by other camera feeds.
+                  </p>
+                  {webcamError ? (
+                    <div className="w-full rounded-lg border border-dashed border-red-500/40 bg-red-950/20 p-4 text-xs text-red-200">
+                      {webcamError}
+                    </div>
+                  ) : (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
+                      className="w-full aspect-video bg-black rounded-lg overflow-hidden border border-gray-600"
+                    >
+                      <video
+                        ref={webcamVideoRef}
+                        muted
+                        playsInline
+                        autoPlay
+                        className="w-full h-full object-contain"
+                      />
+                    </motion.div>
+                  )}
+                </div>
               )}
             </div>
 
@@ -344,6 +433,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   latitude === null ||
                   longitude === null ||
                   (mode === "url" && !url.trim()) ||
+                  (mode === "webcam" && !webcamReady) ||
                   detectionsEnabled.length === 0 ||
                   (detectionsEnabled.includes("stampede") &&
                     (!Number.isInteger(Number(stampedePersonLimit)) ||
@@ -355,6 +445,7 @@ export const AddCameraModal = ({ onAdd, onClose }) => {
                   latitude === null ||
                   longitude === null ||
                   (mode === "url" && !url.trim()) ||
+                  (mode === "webcam" && !webcamReady) ||
                   detectionsEnabled.length === 0 ||
                   (detectionsEnabled.includes("stampede") &&
                     (!Number.isInteger(Number(stampedePersonLimit)) ||
